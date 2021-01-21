@@ -1,0 +1,18 @@
+#include "ProtoDUNEBeamlineUtils.fcl"
+
+BEGIN_PROLOG
+
+pi0_test_selection:
+{
+   module_type:             "pi0TestSelection"
+   CalorimetryTag:          "pandoracalo"
+   TrackerTag:              "pandoraTrack"
+   ShowerTag:               "pandoraShower"
+   PFParticleTag:           "pandora"
+   GeneratorTag:            "generator"
+   Verbose:                 true
+   BeamlineUtils:        @local::standard_protodunebeamlineutils
+   momentum:				1
+}
+
+END_PROLOG
