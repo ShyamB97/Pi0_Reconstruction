@@ -81,8 +81,12 @@ private:
 
   // local variables
   bool fVerbose;
+
+  int nomialMomentum = 1;
   protoana::ProtoDUNEBeamlineUtils fBeamlineUtils; // get BeamLineUtils class
   TTree *fOutTree = new TTree;
+  std::vector<int> pdgs; // particle ids
+  
   unsigned int eventID;
 };
 
@@ -105,6 +109,7 @@ void protoana::pi0TestSelection::beginJob()
 {
   art::ServiceHandle<art::TFileService> tfs;
   fOutTree = tfs->make<TTree>("tree", "");
+  fOutTree->Branch("pdgs", &pdgs);
   fOutTree->Branch("EventID", &eventID);
 }
 
@@ -112,8 +117,40 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
 {
   std::cout << "module running..." << std::endl;
 
+  protoana::ProtoDUNEPFParticleUtils pfpUtil;
+  protoana::ProtoDUNETrackUtils trkUtil;
+
   eventID = evt.id().event();
-  
+
+  if(!evt.isRealData())
+  {
+  	std::cout << "we have MC data" << std::endl;
+  	auto beamHandle = evt.getValidHandle<std::vector<beam::ProtoDUNEBeamEvent>>("generator");
+		std::vector<art::Ptr<beam::ProtoDUNEBeamEvent> > beamVec;
+		art::fill_ptr_vector(beamVec, beamHandle);
+		const beam::ProtoDUNEBeamEvent& beamEvent = *(beamVec.at(0));
+
+		std::cout << "Timing Trigger: " << beamEvent.GetTimingTrigger() << std::endl;  // print out timing tigger
+		std::cout << "matched with database: " << beamEvent.CheckIsMatched() << std::endl; // check if beam event was matched with existing database
+		std::cout << "got beamEvent!" << std::endl;
+		
+		pdgs = fBeamlineUtils.GetPID(beamEvent, nomialMomentum); // get ID of particles
+		std::vector<const recob::PFParticle*> beamParticles = pfpUtil.GetPFParticlesFromBeamSlice(evt, fPFParticleTag);
+
+		if(beamParticles.size() > 1)
+		{
+			std::cout << "We have more tha one Beam particle!" << std::endl;
+			return;
+		}
+		auto beamParticle = beamParticles[0];
+		//Verifying pdg code from beamEvent to PFP, should be equal for MC data
+		int pdgFromPFP = beamParticle->PdgCode();
+		if(pdgFromPFP == pdgs[0])
+		{
+			std::cout << "PFP code matches beamline code" << std::endl;
+		}
+  }
+
   fOutTree->Fill();
 }
 
