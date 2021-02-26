@@ -6,88 +6,75 @@ Created on Fri Feb 12 09:49:07 2021
 @author: sb16165
 """
 
-import uproot
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
+import Master
+from Master import Unwrap, Vector3
+
+
+def Plot(x, y, xlabel="", ylabel="", title=""):
+    """
+    Plot line graph.
+    """
+    plt.plot(x, y, marker="o")
+    plt.ylabel(ylabel)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+
 
 def PlotHist(data, bins=100, xlabel="", title="", sf=2):
     """
-    plot hostogram of data and axes including bin width
+    Plot histogram of data and axes including bin width.
+    ----- Parameters -----
+    height      : bin height
+    edges       : right edge of the bins
+    ----------------------
     """
     height, edges, _ = plt.hist(data, bins)
     binWidth = round((edges[-1] - edges[0]) / len(edges), sf)
     plt.ylabel("Number of events (bin width=" + str(binWidth) + ")")
     plt.xlabel(xlabel)
     plt.title(title)
+    plt.tight_layout()
+    return height, edges
 
 
 def PlotHist2D(data_x, data_y, bins=100, x_range=[], y_range=[], xlabel="", ylabel="", title=""):
     """
     Plots two datasets in a 2D histogram.
     """
+    # clamp data_x and data_y given the x range
     if len(x_range) == 2:
-        data_y = data_y[data_x > x_range[0]]
+        data_y = data_y[data_x > x_range[0]] # clamp y before x
         data_x = data_x[data_x > x_range[0]]
         
         data_y = data_y[data_x < x_range[1]]
         data_x = data_x[data_x < x_range[1]]
-
+    
+    # clamp data_x and data_y given the y range
     if len(y_range) == 2:
-        data_x = data_x[data_y > y_range[0]]
+        data_x = data_x[data_y > y_range[0]] # clamp x before y
         data_y = data_y[data_y > y_range[0]]
         
         data_x = data_x[data_y < y_range[1]]
         data_y = data_y[data_y < y_range[1]]
-        
+
+    # plot data with a logarithmic color scale
     plt.hist2d(data_x, data_y, 100, norm=matplotlib.colors.LogNorm())
     plt.colorbar()
+
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.title(title)
-
-
-def GetData(name, unwrap=False):
-    """
-    Get dataset from ROOT file. will unwrap if needed
-    ----- Parameters -----
-    data    : recovered data from ROOT file, converted into a nested numoy array, 
-              first depth is the events if the data set is nested. The following
-              depths depend on the data in question
-    ----------------------
-    """
-    data = tree_pduneana[name].arrays(library="np")[name]
-    
-    # consider removing
-    if unwrap is True:
-        return Unwrap(data)
-    else:
-        return data
-
-
-def Unwrap(data):
-    """
-    Unwraps nested numpy arrays, needed because the datasets per event do not
-    have the same length so is hard for plotting functions to interpret.
-    Use mainly for plotting data. Note this unrwaps data at a depth of one,
-    for higher depths i.e. nested arrays of nested arrays, use the function
-    more than once i.e. Unravel(Unravel(...
-    ----- Parameters -----
-    _list   : list of data unwrapped.
-    obj     : object stored at the first depth
-    ----------------------
-    """
-    _list = []
-    for obj in data:
-        for item in obj:
-            _list.append(item)
-    return np.array(_list, object)
+    plt.tight_layout()
 
 
 def Angle(x_0, y_0, z_0, x_1, y_1, z_1):
     """
-    Calculates the angle between two vectors (or list of vectors)
+    Calculates the angle between two vectors (or list of vectors).
     ----- Parameters -----
     x_n         : vector component x of vector n
     dot         : dot product of the two vectors
@@ -99,13 +86,14 @@ def Angle(x_0, y_0, z_0, x_1, y_1, z_1):
 
     mag_0 = (x_0**2 + y_0**2 + z_0**2)**0.5
     mag_1 = (x_1**2 + y_1**2 + z_1**2)**0.5
+
     cos_angle = dot / ( mag_0 * mag_1 )
     return np.arccos(cos_angle)
 
 
 def GetShowerPairs(start_x, start_y, start_z):
     """
-    Pairs daughter events based on their start vector separation
+    Pairs daughter events based on their start vector separation.
     ----- Parameters -----
     array_n     : nth component of start position of each daughter in the event
     dists_n     : nth compnent of the distance between the jth daughter event and all other daughters
@@ -151,13 +139,13 @@ def GetShowerPairs(start_x, start_y, start_z):
 
     # remove output of showers with no pairs and duplicates
     evt_pairs = [removeDuplicates(i) for i in evt_pairs]
-    return evt_pairs
+    return np.array(evt_pairs, object)
 
 
-def ShowerPairSeparation(start_x, start_y, start_z, actual_pairs=False):
+def ShowerPairSeparation(start_x, start_y, start_z, actual_pairs=True):
     """
     Gets separation of paired daughter events, either all possible pairs or 
-    the true pairs (closest separation per daughter)
+    the true pairs (closest separation per daughter).
     ----- Parameters -----
     nEvents         : number of events
     null_value      : value to replace zero when calculating distances, done to exclude distance to self
@@ -216,12 +204,12 @@ def ShowerPairSeparation(start_x, start_y, start_z, actual_pairs=False):
             evt_pairs_dist[i] = evt
 
     else:
-        # do stuff
         evt_pairs_dist = []
         showerPairs = GetShowerPairs(start_x, start_y, start_z)
         for i in range(len(showerPairs)):
+            pair_dists = []
             if(len(showerPairs[i]) == 0):
-                evt_pairs_dist.append(-999)
+                pair_dists.append(-999)
             else:
                 for pair in showerPairs[i]:
                     x_0 = start_x[i][pair[0]]
@@ -235,14 +223,16 @@ def ShowerPairSeparation(start_x, start_y, start_z, actual_pairs=False):
                     y = y_1 - y_0
                     z = z_1 - z_0
                     
-                    evt_pairs_dist.append( np.sqrt( x**2 + y**2 + z**2 ) )
-        evt_pairs_dist = np.array( evt_pairs_dist )
-    return evt_pairs_dist
+                    pair_dists.append( np.sqrt( x**2 + y**2 + z**2 ) )
+
+            evt_pairs_dist.append(pair_dists)
+
+    return np.array(evt_pairs_dist, object)
 
 
 def ShowerPairAngle(start_x, start_y, start_z, dir_x, dir_y, dir_z):
     """
-    Gets the angle between daughter pairs
+    Gets the angle between daughter pairs.
     ----- Parameters -----
     showerPairs     : daughters paired using GetSHowerPairs
     x_0, ...        : direction vector components of the first shower pair
@@ -272,33 +262,48 @@ def ShowerPairAngle(start_x, start_y, start_z, dir_x, dir_y, dir_z):
 
 def ShowerPairEnergy(start_x, start_y, start_z, shower_energy):
     """
-    Gets the Energy of the daughter pairs
+    Gets the Energy of the daughter pairs.
     ----- Parameters -----
     pairs           : daughters paired using GetSHowerPairs
     energy          : list of energy for pair 0 and pair 1
     pairs_energy    : shower energy paired by daughters for each event
+    leading_energy  : shower in pair with the higher energy
+    secondary_energy: shower in pair with the lower energy
+    energy_min      : shower in pair with the higher energy
+    energy_min      : shower in pair with the lower energy
     ----------------------
     """
     pairs = GetShowerPairs(start_x, start_y, start_z)
 
     pairs_energy = []
+    leading_energy = []
+    secondary_energy = []
     for i in range(len(pairs)):
         evt_pairs = pairs[i]
         evt_energy = shower_energy[i]
     
         energy = []
+        energy_min = []
+        energy_max = []
         for j in range(len(evt_pairs)):
             pair = evt_pairs[j]
-            energy.append( [evt_energy[pair[0]],  evt_energy[pair[1]]] )
+            paired_energy = [evt_energy[pair[0]],  evt_energy[pair[1]]]
+ 
+            energy.append(paired_energy)
+            energy_min.append(min(paired_energy))
+            energy_max.append(max(paired_energy))
+
         pairs_energy.append(energy)
-    return np.array(pairs_energy, object)
+        leading_energy.append(energy_max)
+        secondary_energy.append(energy_min)
+    return np.array(pairs_energy, object), np.array(leading_energy, object), np.array(secondary_energy, object)
 
 
 def removeDuplicates(pairs_list):
     """
-    used to remove identical daugher pairs and daughter pairs without identical copies
+    Used to remove identical daugher pairs and daughter pairs without identical copies
     (daugthers that are correctly paired from GetShowerPair should have two lists that are
-     reveresed i.e. [0, 3] and [3, 0])
+     reveresed i.e. [0, 3] and [3, 0]).
     ----- Parameters -----
     _list   : returned list of pairs
     copy    : list to keep track of pairs already found
@@ -331,10 +336,11 @@ def BeamTrackShowerAngle(start_x, start_y, start_z, end_x, end_y, end_z, dir_x, 
     beam_dist_y = end_y - start_y
     beam_dist_z = end_z - start_z
 
-    beam_dist = np.sqrt(beam_dist_x**2 + beam_dist_x**2 + beam_dist_x**2)
+    #beam_dist = np.sqrt(beam_dist_x**2 + beam_dist_y**2 + beam_dist_z**2)
+    beam_dist = ( beam_dist_x**2 + beam_dist_y**2 + beam_dist_z**2 )**0.5
 
     angles = []
-    for i in range(len(reco_daughter_allShower_dirX)):
+    for i in range(len(dir_x)):
         evt_x = dir_x[i]
         evt_y = dir_y[i]
         evt_z = dir_z[i]
@@ -383,30 +389,7 @@ def DaughterRecoMCAngle(true_start_x, true_start_y, true_start_z, true_end_x, tr
                                     true_dist_y[i][j], 
                                     true_dist_z[i][j]) )
         angles.append(angle)
-    return angles
-
-
-def Selection(data, value, cut, greater=True):
-    """
-    Selection funciton. Applies a cut wrt the value on data. Either greater than
-    or less than
-    ----- Parameters -----
-    selected_data       : data post selection
-    evt                 : data per event
-    new_evt             : selected data per event
-    ----------------------
-    """
-    selected_data = []
-    for i in range(len(reco_daughter_allShower_dirX)):
-        evt = reco_daughter_allShower_dirX[i]
-        evt_value = value[i]
-        new_evt = []
-        for j in range(len(evt)):
-            if evt_value[j] > cut:
-                new_evt.append(evt[j])
-        if len(new_evt) > 0:
-            selected_data.append(new_evt)
-    return np.array(selected_data, object)
+    return np.array(angles, object)
 
 
 def CNNScore(em, track, average=False):
@@ -426,7 +409,7 @@ def CNNScore(em, track, average=False):
 
 def ResidualShowerEnergy(shower_energy, true_energy):
     """
-    Calculate the shower energy residual per daughter
+    Calculate the shower energy residual per daughter.
     ----- Parameters -----
     residual_energy    : energy residual per event per shower
     evt                : ennergy of daughters in an event
@@ -461,7 +444,7 @@ def InvariantMass(start_x, start_y, start_z, dir_x, dir_y, dir_z, shower_energy)
     ----------------------
     """    
     showerPair_angles = ShowerPairAngle(start_x, start_y, start_z, dir_x, dir_y, dir_z)
-    showerPair_energy = ShowerPairEnergy(start_x, start_y, start_z, shower_energy)
+    showerPair_energy, _, _ = ShowerPairEnergy(start_x, start_y, start_z, shower_energy)
     
     inv_mass = []
     for i in range(len(showerPair_angles)):
@@ -477,90 +460,278 @@ def InvariantMass(start_x, start_y, start_z, dir_x, dir_y, dir_z, shower_energy)
                 if energies[0] != -999 and energies[1] != -999:
                     # calculate the invariant mass using particle kinematics
                     evt_inv_mass.append( np.sqrt(2 * energies[0] * energies[1] * (1 - np.cos(angle))) )
+                else:
+                    evt_inv_mass.append(-999)
+            else:
+                evt_inv_mass.append(-999)
+
         inv_mass.append(evt_inv_mass)
 
     return np.array(inv_mass, object)
 
 
-file = uproot.open("pduneana_Prod4_1GeV_2_9_21.root")
+def GetNumResonantParticles(start_x, start_y, start_z):
+    """
+    Gets the number of pairs i.e. the number of particles which produce these daughters,
+    assuming it decays only into two shower pairs.
+    ----- Parameters -----
+    numParticles    : number of pairs in an event
+    ----------------------
+    """
+    pairs = GetShowerPairs(start_x, start_y, start_z)
 
-tree_pduneana = file['pduneana/beamana']
-
-
-reco_daughter_em_cnn = GetData("reco_daughter_PFP_emScore")
-reco_daughter_track_cnn = GetData("reco_daughter_PFP_trackScore")
-reco_daughter_nHits_collection = GetData("reco_daughter_PFP_nHits_collection")
-
-
-reco_daughter_allShower_startX = GetData("reco_daughter_allShower_startX")
-reco_daughter_allShower_startY = GetData("reco_daughter_allShower_startY")
-reco_daughter_allShower_startZ = GetData("reco_daughter_allShower_startZ")
-reco_daughter_allShower_dirX = GetData("reco_daughter_allShower_dirX")
-reco_daughter_allShower_dirY = GetData("reco_daughter_allShower_dirY")
-reco_daughter_allShower_dirZ = GetData("reco_daughter_allShower_dirZ")
+    numParticles = []
+    for i in range(len(pairs)):
+        numParticles.append(len(pairs[i]))
+    return np.array(numParticles, object)
 
 
-reco_beam_startX = GetData("reco_beam_startX")
-reco_beam_startY = GetData("reco_beam_startY")
-reco_beam_startZ = GetData("reco_beam_startZ")
-reco_beam_endX = GetData("reco_beam_endX")
-reco_beam_endY = GetData("reco_beam_endY")
-reco_beam_endZ = GetData("reco_beam_endZ")
+def GetResonantMomentum(start_x, start_y, start_z, shower_energy):
+    """
+    Returns the monemtum of the parent per shower pair per event, assuming the
+    daugthers are photons.
+    ----- Parameters -----
+    energies    : shower pair energies
+    momenta     : resonant momenta
+    evt         : energy pairs per event
+    evt_mom     : resontant momenta per event
+    e0, e1      : shower energies in a pair
+    ----------------------
+    """
+    energies, _, _ = ShowerPairEnergy(start_x, start_y, start_z, shower_energy)
+    
+    momenta = []
+    for i in range(len(energies)):
+        evt = energies[i]
+        
+        evt_mom = []
+        for j in range(len(evt)):
+            
+            e0 = evt[j][0]
+            e1 = evt[j][1]
+            
+            if evt[j] != -999:
+                if e0 != -999 and e1 != -999:
+                    evt_mom.append(e0 + e1)
+                else:
+                    evt_mom.append(-999)
+            else:
+                evt_mom.append(-999)
+
+        momenta.append(evt_mom)
+    return np.array(momenta, object)
 
 
-reco_daughter_PFP_true_byHits_startX = GetData("reco_daughter_PFP_true_byHits_startX")
-reco_daughter_PFP_true_byHits_startY = GetData("reco_daughter_PFP_true_byHits_startY")
-reco_daughter_PFP_true_byHits_startZ = GetData("reco_daughter_PFP_true_byHits_startZ")
-reco_daughter_PFP_true_byHits_endX = GetData("reco_daughter_PFP_true_byHits_endX")
-reco_daughter_PFP_true_byHits_endY = GetData("reco_daughter_PFP_true_byHits_endY")
-reco_daughter_PFP_true_byHits_endZ = GetData("reco_daughter_PFP_true_byHits_endZ")
+def GetResonanceEnergy(start_x, start_y, start_z, dir_x, dir_y, dir_z, shower_energy):
+    """
+    Calculate the emergy of the parent particle produding the shower pairs.
+    ----- Parameters -----
+    mass        : Invariant mass calculated from shower pair energies
+    momentum    : momentum of the parent particle assuming the daughters are massless
+    res_mass    : parent mass of a pair for an event
+    res_mom     : parent momentum of a pair for an event
+    evt_energy  : parent energy for an event 
+    energy      : parent energies per event
+    ----------------------
+    """
+    mass = InvariantMass(start_x, start_y, start_z, dir_x, dir_y, dir_z, shower_energy)
+    momentum = GetResonantMomentum(start_x, start_y, start_z, shower_energy)
+    
+    energy = []
+    for i in range(len(mass)):
+        evt_energy = []
+        for j in range(len(mass[i])):
+            
+            res_mass = mass[i][j]
+            res_mom = momentum[i][j]
+            
+            if res_mass != -999 and res_mom != -999:
+                evt_energy.append( ( res_mass**2 + res_mom**2 )**0.5 )
+            else:
+                evt_energy.append(-999)
+        energy.append(evt_energy)
+    return np.array(energy, object)
 
 
-reco_daughter_PFP_true_byHits_startE = GetData("reco_daughter_PFP_true_byHits_startE") * 1000  # GeV for some reason
-reco_daughter_allShower_energy = GetData("reco_daughter_allShower_energy")
+def Selection(data, value, cut, greater=True, beamData=True):
+    """
+    Selection function. Applies a cut wrt the value on data. Either greater than
+    or less than.
+    ----- Parameters -----
+    selected_data       : data post selection
+    evt                 : data per event
+    new_evt             : selected data per event
+    beamData            : if the data is event level only i.e. not daughter data,
+                          important since beam data and daughter data have different
+                          struture in the per event data.
+    ----------------------
+    """
+    selected_data = []
+    for i in range(len(value)):
+        evt = data[i]
+        evt_value = value[i]
+        new_evt = []
+        for j in range(len(evt_value)):
+
+            if greater is True and evt_value[j] > cut:
+                if beamData is True:
+                    selected_data.append(evt)
+                    break
+                else:
+                    new_evt.append(evt[j])
+
+            if greater is False and evt_value[j] < cut:
+                if beamData is True:
+                    selected_data.append(evt)
+                    break
+                else:
+                    new_evt.append(evt[j])
+
+        if len(new_evt) > 0:
+            selected_data.append(new_evt)
+
+    return np.array(selected_data, object)
+
+
+
+data = Master.Data("pduneana_Prod4_1GeV_2_9_21.root")
 
 
 """SELECTION"""
-#cnnScore = CNNScore(reco_daughter_em_cnn, reco_daughter_track_cnn)
 
-start_x = reco_daughter_allShower_startX
-start_y = reco_daughter_allShower_startY
-start_z = reco_daughter_allShower_startZ
+print("getting daughter info...")
+start_pos = data.start_pos()
+direction = data.direction()
+energy = data.energy()
+mc_energy = data.mc_energy()
+nHits = data.nHits()
 
-dir_x = reco_daughter_allShower_dirX
-dir_y = reco_daughter_allShower_dirY
-dir_z = reco_daughter_allShower_dirZ
+print("getting beam info...")
+beam_start_pos = data.beam_start_pos()
+beam_end_pos = data.beam_end_pos()
 
-true_start_x = reco_daughter_PFP_true_byHits_startX
-true_start_y = reco_daughter_PFP_true_byHits_startY
-true_start_z = reco_daughter_PFP_true_byHits_startZ
-true_end_x = reco_daughter_PFP_true_byHits_endX
-true_end_y = reco_daughter_PFP_true_byHits_endY
-true_end_z = reco_daughter_PFP_true_byHits_endZ
+print("getting daughter truth info...")
+true_start_pos = data.true_start_pos()
+true_end_pos = data.true_end_pos()
 
-shower_energy = reco_daughter_allShower_energy
+#Calculated quantities
+print("calculating cnn_score...")
+cnn_score = CNNScore(data.cnn_em(), data.cnn_track())
+cut = 0.6
+# apply selection to all the data
 
-nHits = Unwrap(reco_daughter_nHits_collection)
+print("Applying selection...")
+start_pos = Vector3(Selection(start_pos.x, cnn_score, cut),
+                    Selection(start_pos.y, cnn_score, cut),
+                    Selection(start_pos.z, cnn_score, cut))
+
+direction = Vector3(Selection(direction.x, cnn_score, cut),
+                    Selection(direction.y, cnn_score, cut),
+                    Selection(direction.z, cnn_score, cut))
+
+energy = Selection(energy, cnn_score, cut)
+mc_energy = Selection(mc_energy, cnn_score, cut)
+nHits = Unwrap(Selection(nHits, cnn_score, cut))
+
+beam_start_pos = Vector3(Selection(beam_start_pos.x, cnn_score, cut, beamData=True),
+                         Selection(beam_start_pos.y, cnn_score, cut, beamData=True),
+                         Selection(beam_start_pos.z, cnn_score, cut, beamData=True))
+
+beam_end_pos = Vector3(Selection(beam_end_pos.x, cnn_score, cut, beamData=True),
+                       Selection(beam_end_pos.y, cnn_score, cut, beamData=True),
+                       Selection(beam_end_pos.z, cnn_score, cut, beamData=True))
+
+true_start_pos = Vector3(Selection(true_start_pos.x, cnn_score, cut),
+                         Selection(true_start_pos.y, cnn_score, cut),
+                         Selection(true_start_pos.z, cnn_score, cut))
+
+true_end_pos = Vector3(Selection(true_end_pos.x, cnn_score, cut),
+                       Selection(true_end_pos.y, cnn_score, cut),
+                       Selection(true_end_pos.z, cnn_score, cut))
+
+print("calculating quantities...")
+
+print("energy residual")
+energyResidual = Unwrap( (energy - mc_energy)/ mc_energy )
+
+print("angle between beam and daughters")
+beam_angle = Unwrap(BeamTrackShowerAngle(beam_start_pos.x, beam_start_pos.y, beam_start_pos.z,
+                                  beam_end_pos.x, beam_end_pos.y, beam_end_pos.z,
+                                  direction.x, direction.y, direction.z))
+
+print("angle between daughters and mc particle")
+mc_angle = Unwrap(DaughterRecoMCAngle(true_start_pos.x, true_start_pos.y, true_start_pos.z,
+                               true_end_pos.x, true_end_pos.y, true_end_pos.z,
+                               direction.x, direction.y, direction.z))
+
+print("separation")
+pair_separation = Unwrap(ShowerPairSeparation(start_pos.x, start_pos.y, start_pos.z))
+
+print("pair angle")
+pair_angle = Unwrap(ShowerPairAngle(start_pos.x, start_pos.y, start_pos.z, direction.x, direction.y, direction.z))
+
+print("pair energy")
+pair_energies, pair_leading, pair_second = ShowerPairEnergy(start_pos.x, start_pos.y, start_pos.z, energy)
+
+pair_energies = Unwrap(pair_energies) / 1000
+pair_leading = Unwrap(pair_leading) / 1000
+pair_second = Unwrap(pair_second) / 1000
+
+print("Invariant mass")
+inv_mass = Unwrap(InvariantMass(start_pos.x, start_pos.y, start_pos.z, direction.x, direction.y, direction.z, energy))
 
 
-angles = BeamTrackShowerAngle(reco_beam_startX, reco_beam_startY, reco_beam_startZ, 
-                              reco_beam_endX , reco_beam_endY, reco_beam_endZ, 
-                              dir_x, dir_y, dir_z)
-
-angles = Unwrap(angles)
-
-
-PlotHist2D(nHits, angles, 100, [-1, 501], [-999, np.pi], "Number of collection plane hits", "Angle between daughters and beam track")
 
 """
-height, edges, _ = plt.hist(reco_daughter_nHits_collection, 100)
-binWidth = round((edges[-1] - edges[0]) / len(edges), 2)
-plt.ylabel("Number of events (bin width=" + str(binWidth) + ")")
-plt.xlabel("number of collection plane hits")
-
-
-height, edges, _ = plt.hist(cnnScore, 100)
-binWidth = round((edges[-1] - edges[0]) / len(edges), 2)
-plt.ylabel("Number of events (bin width=" + str(binWidth) + ")")
-plt.xlabel("CNN score of beam daughters")
+pair_separation = pair_separation[pair_separation > 0]
+PlotHist(pair_separation[pair_separation < 51], 100, "Shower pair Separation (cm)")
 """
+
+"""
+PlotHist2D(nHits, mc_angle, 100, [-999, 510], [0, np.pi], "Number of collection plane hits", "Angle between shower and MC parent (rad)")
+"""
+
+"""
+PlotHist2D(nHits, beam_angle, 100, [-999, 501], [0, np.pi], "Number of collection plane hits", "Angle between beam track and daughter shower (rad)")
+"""
+
+"""
+PlotHist2D(nHits, energyResidual, 100, [-999, 501], [-1, 1], "Number of collection plane hits", "Reconstruted energy residual")
+"""
+
+"""
+inv_mass = inv_mass[inv_mass > 0] / 1000
+PlotHist(inv_mass[inv_mass < 0.5], 100, "Invaraint mass of the shower pair parent (GeV)", "", 3)
+"""
+
+"""
+pair_angle = pair_angle[pair_angle != -999]
+PlotHist(pair_angle, 100, "Angle between beam track and daughter shower (rad)")
+"""
+
+"""
+beam_angle = beam_angle[beam_angle != -999]
+PlotHist(beam_angle, 100, "Angle between beam track and daughter shower (rad)")
+"""
+
+"""
+nHits = Unwrap(nHits)
+nHits = nHits[nHits != 0]
+PlotHist(nHits[nHits < 101], 100, "Number of collection plane hits")
+"""
+
+"""
+pair_leading = pair_leading[pair_leading > 0]
+pair_second = pair_second[pair_second > 0]
+
+plt.figure(2, (10, 5))
+
+plt.subplot(122)
+_, edges = PlotHist(pair_second, xlabel="Shower with the smaller energy in a pair (GeV)", title="(b)")
+
+plt.subplot(121)
+PlotHist(pair_leading, edges, xlabel="Shower with the most energy in a pair (GeV)", title="(a)")
+
+plt.tight_layout()
+"""
+
