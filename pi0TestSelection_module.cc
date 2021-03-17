@@ -48,7 +48,7 @@
 #include <TH1D.h>
 #include "Math/Vector3D.h"
 
-//Use this to get CNN number
+//Use this to get CNN numbers
 #include "lardata/ArtDataHelper/MVAReader.h"
 
 namespace protoana {
@@ -76,8 +76,10 @@ class protoana::pi0TestSelection : public art::EDAnalyzer {
   void analyze(art::Event const & e) override;
 
   // Custom functions.
+  int PandoraIdentification(const recob::PFParticle &daughterPFP, const art::Event &evt);
   std::vector<double> CNNScoreCalculator(anab::MVAReader<recob::Hit,4> &hitResults, const std::vector< art::Ptr< recob::Hit > > &hits, unsigned int &n);
   std::vector<double> StartHitQuantityCalculator(TVector3 &hitStart, TVector3 &hit, TVector3 &direction);
+  double ShowerEnergyCalculator(std::vector<art::Ptr<recob::Hit> > &hits, const detinfo::DetectorPropertiesData &detProp, art::FindManyP<recob::SpacePoint> &spFromHits);
   void reset();
 
   private:
@@ -90,21 +92,30 @@ class protoana::pi0TestSelection : public art::EDAnalyzer {
   std::string fHitTag;
   std::string fPFParticleTag;
   std::string fGeneratorTag;
-  std::string fOpFlashTag;
+  bool fVerbose;
+  protoana::ProtoDUNEBeamlineUtils fBeamlineUtils; // get BeamLineUtils class... <consider removing>
   art::ServiceHandle<geo::Geometry> geom;
   art::ServiceHandle<cheat::BackTrackerService> bt_serv;
   art::ServiceHandle< cheat::ParticleInventoryService > pi_serv;
 
+  //Initialise protodune analysis utility classes
+  protoana::ProtoDUNEPFParticleUtils pfpUtil;
+  protoana::ProtoDUNETrackUtils trkUtil;
+  protoana::ProtoDUNETruthUtils truthUtil;
+  protoana::ProtoDUNEShowerUtils showerUtil;
+  protoana::ProtoDUNETrackUtils trackUtil;
+
   // local variables
-  bool fVerbose;
-
   int nomialMomentum = 1;
-  protoana::ProtoDUNEBeamlineUtils fBeamlineUtils; // get BeamLineUtils class
   TTree *fOutTree = new TTree;
+
+  //meta-data
   std::vector<int> pdgs; // particle ids
+  double totalEvents; // number of events processed
+  double beamEvents; // number of events with beam particles
 
+  // track-shower identification
   std::vector<int> pandoraTags; // track/shower like tag from pandora
-
   std::vector<double> emScore;
   std::vector<double> trackScore;
   std::vector<double> CNNScore; // CNN score per shower
@@ -119,9 +130,10 @@ class protoana::pi0TestSelection : public art::EDAnalyzer {
   std::vector<double> dirY;
   std::vector<double> dirZ;
 
+  // hit/energy quantities
+  std::vector<int> nHits; // number of collection plane hits
   std::vector<double> energy; // reco shower energy in ???
   std::vector<double> energyMC; // mc shower energy in GeV
-  std::vector<int> nHits; // number of collection plane hits
 
   // quantity used to calculate the number of start hits
   std::vector<std::vector<double>> hitRadial;
@@ -166,6 +178,91 @@ protoana::pi0TestSelection::pi0TestSelection(fhicl::ParameterSet const & p)
 { }
 
 
+// shower energy calculation, taken from Jake Calcutt's PDPSPAnalyser
+double protoana::pi0TestSelection::ShowerEnergyCalculator(std::vector<art::Ptr<recob::Hit> > &hits, const detinfo::DetectorPropertiesData &detProp, art::FindManyP<recob::SpacePoint> &spFromHits)
+{
+  std::vector<double> x_vec, y_vec, z_vec; // parameterised hit position vector for each hit
+  double total_y = 0;
+  int n_good_y = 0;
+  std::vector<art::Ptr<recob::Hit>> good_hits;
+  for(unsigned int i = 0; i < hits.size(); i++)
+  {
+    auto hit = hits[i];
+    // skip any hits not on the collection plane (shouldn't be anyways)
+    if(hit->View() != 2)
+    {
+      continue;
+    }
+
+    good_hits.push_back(hit);
+
+    double shower_hit_x = detProp.ConvertTicksToX(hit->PeakTime(), hit->WireID().Plane, hit->WireID().TPC, 0);
+    double shower_hit_z = geom->Wire(hit->WireID()).GetCenter().Z();
+
+    x_vec.push_back(shower_hit_x);
+    z_vec.push_back(shower_hit_z);
+
+    std::vector<art::Ptr<recob::SpacePoint>> sps = spFromHits.at(i);
+    if (!sps.empty())
+    {
+      y_vec.push_back(sps[0]->XYZ()[1]);
+      total_y += y_vec.back();
+      n_good_y++;
+    }
+    else
+    {
+      y_vec.push_back(-999.);
+    }
+  }
+
+  double total_energy = 0;
+  if(n_good_y < 1)
+  {
+    std::cout << "could not reconstruct energy" << std::endl;
+    total_energy = -999;
+  }
+  else
+  {
+    for(unsigned int j = 0; j < good_hits.size(); j++)
+    {
+      auto good_hit = good_hits[j];
+      
+      if(good_hit->View() != 2)
+      {
+        continue;
+      }
+
+      if (y_vec[j] < -100.)
+      {
+        y_vec[j] = total_y / n_good_y;
+      }
+      total_energy += calibration_SCE.HitToEnergy(good_hit, x_vec[j], y_vec[j], z_vec[j]);
+    }
+  }
+  return total_energy;
+}
+
+// track/shower identification done thorugh pandora, returns 11 for a shower and 13 for a track
+int protoana::pi0TestSelection::PandoraIdentification(const recob::PFParticle &daughterPFP, const art::Event &evt)
+{
+    // determine if they are track like or shower like using pandora
+    // then fill a vector containing this data: 11 = shower 13 = track
+    if(pfpUtil.IsPFParticleShowerlike(daughterPFP, evt, fPFParticleTag, fShowerTag))
+    {
+      return 11;
+    }
+    else if(pfpUtil.IsPFParticleTracklike(daughterPFP, evt, fPFParticleTag, fTrackerTag))
+    {
+      return 13;
+    }
+    else
+    {
+      return -999;
+    }
+    return -1;
+}
+
+
 // Calculates the CNN score of the event. Used to determine if a an event is track or shower like.
 std::vector<double> protoana::pi0TestSelection::CNNScoreCalculator(anab::MVAReader<recob::Hit,4> &hitResults, const std::vector< art::Ptr< recob::Hit > > &hits, unsigned int &n)
 {
@@ -203,38 +300,15 @@ std::vector<double> protoana::pi0TestSelection::CNNScoreCalculator(anab::MVARead
 std::vector<double> protoana::pi0TestSelection::StartHitQuantityCalculator(TVector3 &hitStart, TVector3 &hit, TVector3 &direction)
 {
   std::vector<double> output{};  // make the return type a pair!
-  TVector3 cross = (hit - hitStart).Cross(hitStart); // rsin(theta) compare to cylinder radius
-  double dot = (hit - hitStart).Dot(hitStart); // rcos(theta) compare to cylinder length
+  TVector3 cross = (hit - hitStart).Cross(direction); // rsin(theta) compare to cylinder radius
+  double dot = (hit - hitStart).Dot(direction); // rcos(theta) compare to cylinder length
   output.push_back(cross.Mag());
   output.push_back(dot);
   return output;
 }
 
-void protoana::pi0TestSelection::beginJob()
-{
-  // intiialize output root file
-  art::ServiceHandle<art::TFileService> tfs;
-  fOutTree = tfs->make<TTree>("tree", "");
-  //Once we are done, stream results into the ROOT file
-  fOutTree->Branch("pdgs", &pdgs);
-  fOutTree->Branch("EventID", &eventID);
-  fOutTree->Branch("pandoraTag", &pandoraTags);
-  fOutTree->Branch("reco_daughter_PFP_emScore", &emScore);
-  fOutTree->Branch("reco_daughter_PFP_trackScore", &trackScore);
-  fOutTree->Branch("CNNScore", &CNNScore);
-  fOutTree->Branch("reco_daughter_PFP_nHits_collection", &nHits);
-  fOutTree->Branch("reco_daughter_allShower_startX", &startPosX);
-  fOutTree->Branch("reco_daughter_allShower_startY", &startPosY);
-  fOutTree->Branch("reco_daughter_allShower_startZ", &startPosZ);
-  fOutTree->Branch("reco_daughter_allShower_dirX", &dirX);
-  fOutTree->Branch("reco_daughter_allShower_dirY", &dirY);
-  fOutTree->Branch("reco_daughter_allShower_dirZ", &dirZ);
-  fOutTree->Branch("reco_daughter_allShower_energy", &energy);
-  fOutTree->Branch("hitRadial", &hitRadial);
-  fOutTree->Branch("hitLongitudinal", &hitLongitudinal);
-}
 
-
+// Clears the various analyser outputs at the start of a new event to remove the previous events contents
 void protoana::pi0TestSelection::reset()
 {
   pdgs.clear();
@@ -253,18 +327,78 @@ void protoana::pi0TestSelection::reset()
   dirZ.clear();
 
   energy.clear();
-  //energyMC.clear();
+  energyMC.clear();
   nHits.clear();
+
   hitRadial.clear();
   hitLongitudinal.clear();
 
-  //trueStartPosX.clear();
-  //trueStartPosY.clear();
-  //trueStartPosZ.clear();
+  trueStartPosX.clear();
+  trueStartPosY.clear();
+  trueStartPosZ.clear();
   
-  //trueEndPosX.clear();
-  //trueEndPosY.clear();
-  //trueEndPosZ.clear();
+  trueEndPosX.clear();
+  trueEndPosY.clear();
+  trueEndPosZ.clear();
+
+}
+
+
+void protoana::pi0TestSelection::beginJob()
+{
+  // intiialize output root file
+  art::ServiceHandle<art::TFileService> tfs;
+  fOutTree = tfs->make<TTree>("beamana", "");
+  //Once we are done, write results into the ROOT file
+  fOutTree->Branch("pdgs", &pdgs);
+  fOutTree->Branch("EventID", &eventID);
+  fOutTree->Branch("totalEvents", &totalEvents);
+  fOutTree->Branch("beamEvents", &beamEvents);
+
+  // track-shower identification
+  fOutTree->Branch("pandoraTag", &pandoraTags);
+  fOutTree->Branch("reco_daughter_PFP_emScore", &emScore);
+  fOutTree->Branch("reco_daughter_PFP_trackScore", &trackScore);
+  fOutTree->Branch("CNNScore", &CNNScore);
+
+  // shower start position
+  fOutTree->Branch("reco_daughter_allShower_startX", &startPosX);
+  fOutTree->Branch("reco_daughter_allShower_startY", &startPosY);
+  fOutTree->Branch("reco_daughter_allShower_startZ", &startPosZ);
+  
+  // shower direction
+  fOutTree->Branch("reco_daughter_allShower_dirX", &dirX);
+  fOutTree->Branch("reco_daughter_allShower_dirY", &dirY);
+  fOutTree->Branch("reco_daughter_allShower_dirZ", &dirZ);
+  
+  // hit/energy quantities
+  fOutTree->Branch("reco_daughter_PFP_nHits_collection", &nHits);
+  fOutTree->Branch("reco_daughter_allShower_energy", &energy);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_startE", &energyMC);
+
+  // quantity used to calculate the number of start hits
+  fOutTree->Branch("hitRadial", &hitRadial);
+  fOutTree->Branch("hitLongitudinal", &hitLongitudinal);
+
+  // beam start position
+  fOutTree->Branch("reco_beam_startX", &beamStartPosX);
+  fOutTree->Branch("reco_beam_startY", &beamStartPosY);
+  fOutTree->Branch("reco_beam_startZ", &beamStartPosZ);
+
+  // beam end position
+  fOutTree->Branch("reco_beam_endX", &beamEndPosX);
+  fOutTree->Branch("reco_beam_endY", &beamEndPosY);
+  fOutTree->Branch("reco_beam_endZ", &beamEndPosZ);
+
+  // true start position
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_startX", &trueStartPosX);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_startY", &trueStartPosY);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_startZ", &trueStartPosZ);
+
+  // true end position
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_endX", &trueEndPosX);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_endY", &trueEndPosY);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_endZ", &trueEndPosZ);
 
 }
 
@@ -275,36 +409,39 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
   // clear any outputs that are lists
   reset();
 
-  //Initialise util classes
-  protoana::ProtoDUNEPFParticleUtils pfpUtil;
-  protoana::ProtoDUNETrackUtils trkUtil;
-  protoana::ProtoDUNETruthUtils truthUtil;
-  protoana::ProtoDUNEShowerUtils showerUtil;
-  protoana::ProtoDUNETrackUtils trackUtil;
-
   std::cout << "getting handle" << std::endl;
-  auto pfpVec = evt.getValidHandle< std::vector< recob::PFParticle > >( fPFParticleTag );
+  auto pfpVec = evt.getValidHandle<std::vector<recob::PFParticle> >( fPFParticleTag ); // object to allow us to reference the PFParticles in the event
   std::cout << "got handle" << std::endl;
-  eventID = evt.id().event();
+  eventID = evt.id().event(); // keep for meta-data?
 
   std::cout << "getting clockData" << std::endl;
-  auto const clockData = art::ServiceHandle<detinfo::DetectorClocksService>()->DataFor(evt);
+  auto const clockData = art::ServiceHandle<detinfo::DetectorClocksService>()->DataFor(evt); // use timing to match PFP to MC
   std::cout << "got clockData" << std::endl;
-  auto const detProp =  art::ServiceHandle<detinfo::DetectorPropertiesService>()->DataFor(evt, clockData);
+  auto const detProp =  art::ServiceHandle<detinfo::DetectorPropertiesService>()->DataFor(evt, clockData); // object containing physical proteties of the detector
 
   // Get only Beam particle by checking the Beam slices
   std::vector<const recob::PFParticle*> beamParticles = pfpUtil.GetPFParticlesFromBeamSlice(evt, fPFParticleTag);
-  if(beamParticles.size() != 1)
+  
+  if(beamParticles.size() > 1)
   {
+    // consider support for this edge case (if this even occurs?)
     std::cout << "there shouldn't be more than one beam particle" << std::endl;
+  }
+  if(beamParticles.size() == 0)
+  {
+    // nothing to do for this event
+    std::cout << "no beam particle, moving on..." << std::endl;
+    totalEvents ++;
     return;
   }
-  auto beamParticle = beamParticles[0];
+  auto beamParticle = beamParticles[0]; // get the first beam particle (if exists)
+  beamEvents ++;
   pdgs.push_back(beamParticle->PdgCode()); // get ID of particles
 
-  const recob::Track* beamTrack = 0x0;
-  beamTrack = pfpUtil.GetPFParticleTrack(*beamParticle, evt, fPFParticleTag, fTrackerTag);
+  const recob::Track* beamTrack = 0x0; // set to null
+  beamTrack = pfpUtil.GetPFParticleTrack(*beamParticle, evt, fPFParticleTag, fTrackerTag); // get the beam track if it exists
 
+  // store beam track info
   if(!beamTrack)
   {
     std::cout<< "no beam track found, moving on" << std::endl;
@@ -336,42 +473,37 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
     }
   }
 
-  anab::MVAReader<recob::Hit,4> hitResults(evt, "emtrkmichelid:emtrkmichel" );
+  anab::MVAReader<recob::Hit,4> hitResults(evt, "emtrkmichelid:emtrkmichel");
 
-  // get daughterPFP objects using for loops
+  // analyse each daughter PFParticle from the beam
   for( size_t daughterID : beamParticle->Daughters() )
   {
     const recob::PFParticle * daughterPFP = &(pfpVec->at( daughterID ));
+
     // determine if they are track like or shower like using pandora
     // then fill a vector containing this data: 11 = shower 13 = track
-    if(pfpUtil.IsPFParticleShowerlike(*daughterPFP, evt, fPFParticleTag, fShowerTag))
-    {
-      pandoraTags.push_back(11);
-    }
-    if(pfpUtil.IsPFParticleTracklike(*daughterPFP, evt, fPFParticleTag, fTrackerTag))
-    {
-      pandoraTags.push_back(13);
-    }
+    pandoraTags.push_back(PandoraIdentification(*daughterPFP, evt));
 
     // number of collection plane hits
-    auto hits = pfpUtil.GetPFParticleHitsFromPlane_Ptrs( *beamParticle, evt, fPFParticleTag, 2 );
-    unsigned int num = hits.size();
+    auto hits = pfpUtil.GetPFParticleHitsFromPlane_Ptrs( *daughterPFP, evt, fPFParticleTag, 2 ); // get collection plane hit objects for the daughter
+    unsigned int num = hits.size(); // number of hits
     nHits.push_back(num);
-    std::cout << "PFP hits: " << num << std::endl;
+    std::cout << "collection plane hits: " << num << std::endl;
     
     // calculate cnn score
     std::vector<double> cnnOutput = CNNScoreCalculator(hitResults, hits, num);
     CNNScore.push_back(cnnOutput[0]);
+    // also output the average and em track score to calculate it the way done in python
     emScore.push_back(cnnOutput[1]);
     trackScore.push_back(cnnOutput[2]);
 
-    // force daughters to be shower
-    const recob::Shower* shower = 0x0;
+    const recob::Shower* shower = 0x0; // intilise the forced shower object
     std::cout << "Getting shower" << std::endl;
+    // try assigning the forced shower object
     try
     {
       shower =	pfpUtil.GetPFParticleShower(*daughterPFP, evt, fPFParticleTag, "pandora2Shower");
-      art::FindManyP<recob::SpacePoint> spFromHits(hits, evt, fHitTag);
+      art::FindManyP<recob::SpacePoint> spFromHits(hits, evt, fHitTag); // get space point objects of the hits
 
       if(shower)
       {
@@ -390,17 +522,18 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
         dirY.push_back(showerDir.Y());
         dirZ.push_back(showerDir.Z());
 
-        std::vector<double> hitRad;
-        std::vector<double> hitLong;
+        // calculates quantities needed to compute the start hits <move to function?>
+        std::vector<double> hitRad; // magnitudes of cross product of hit positions and shower direction
+        std::vector<double> hitLong; // dot product of of hit positions and shower direction
         for(unsigned int n = 0; n < hits.size(); n++)
         {
-          std::vector<art::Ptr<recob::SpacePoint>> sps = spFromHits.at(n);
+          std::vector<art::Ptr<recob::SpacePoint>> sps = spFromHits.at(n); // get nth space point
 
           if(!sps.empty())
           {
-            TVector3 hitPoint(sps[0]->XYZ()[0], sps[0]->XYZ()[1], sps[0]->XYZ()[2]);
+            TVector3 hitPoint(sps[0]->XYZ()[0], sps[0]->XYZ()[1], sps[0]->XYZ()[2]); // create space point position vector
 
-            std::vector<double> startHitQuantities = StartHitQuantityCalculator(showerStart, hitPoint, showerDir);
+            std::vector<double> startHitQuantities = StartHitQuantityCalculator(showerStart, hitPoint, showerDir); // get start hit quantities
 
             hitRad.push_back(startHitQuantities[0]);
             hitLong.push_back(startHitQuantities[1]);
@@ -415,65 +548,8 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
         hitRadial.push_back(hitRad);
         hitLongitudinal.push_back(hitLong);
 
-        std::vector<double> x_vec, y_vec, z_vec;
-        double total_y = 0;
-        int n_good_y = 0;
-        std::vector<art::Ptr<recob::Hit>> good_hits;
-        for(unsigned int i = 0; i < hits.size(); i++)
-        {
-          auto hit = hits[i];
-          // skip any hits not on the ocllection plane (shouldn't be anyways)
-          if(hit->View() != 2)
-          {
-            continue;
-          }
-
-          good_hits.push_back(hit);
-
-          double shower_hit_x = detProp.ConvertTicksToX(hit->PeakTime(), hit->WireID().Plane, hit->WireID().TPC, 0);
-          double shower_hit_z = geom->Wire(hit->WireID()).GetCenter().Z();
-
-          x_vec.push_back(shower_hit_x);
-          z_vec.push_back(shower_hit_z);
-
-          std::vector<art::Ptr<recob::SpacePoint>> sps = spFromHits.at(i);
-          if (!sps.empty())
-          {
-            y_vec.push_back(sps[0]->XYZ()[1]);
-            total_y += y_vec.back();
-            n_good_y++;
-          }
-          else
-          {
-            y_vec.push_back(-999.);
-          }
-        }
-
-        if(n_good_y < 1)
-        {
-          std::cout << "could not reconstruct energy" << std::endl;
-          energy.push_back(-999);
-        }
-        else
-        {
-          double total_energy = 0;
-          for(unsigned int j = 0; j < good_hits.size(); j++)
-          {
-            auto good_hit = good_hits[j];
-            
-            if(good_hit->View() != 2)
-            {
-              continue;
-            }
-
-            if (y_vec[j] < -100.)
-            {
-              y_vec[j] = total_y / n_good_y;
-            }
-            total_energy += calibration_SCE.HitToEnergy(good_hit, x_vec[j], y_vec[j], z_vec[j]);
-          }
-          energy.push_back(total_energy);
-        }
+        // calculate and push back shower energy
+        energy.push_back(ShowerEnergyCalculator(hits, detProp, spFromHits););
       }
       else
       {
@@ -489,6 +565,13 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
     catch( const cet::exception &e )
     {
       std::cout << "couldn't get shower object! Moving on" << std::endl;
+      startPosX.push_back(-999);
+      startPosY.push_back(-999);
+      startPosZ.push_back(-999);
+      dirX.push_back(-999);
+      dirY.push_back(-999);
+      dirZ.push_back(-999);
+      energy.push_back(-999);
       continue;
     }
   }
@@ -496,28 +579,49 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
   // store any MC reated information here i.e. MC truth info
   if(!evt.isRealData())
   {
+    // backtrack each daughter PFParticle from the beam
     for( size_t daughterID : beamParticle->Daughters() )
     {
       const recob::PFParticle * daughterPFP = &(pfpVec->at( daughterID ));
-      //const sim::ParticleList & plist = pi_serv->ParticleList();
       std::cout << "getting shared hits" << std::endl;
+      // match the MC particle assosiated to the daughter PFParticle by comparing the hit objects
       protoana::MCParticleSharedHits match = truthUtil.GetMCParticleByHits( clockData, *daughterPFP, evt, fPFParticleTag, fHitTag );
       std::cout << "got shared hits" << std::endl;
-      if(match.particle)
+      const simb::MCParticle* mcParticle = match.particle; // get the MCParticle object from the match
+      if(mcParticle)
       {
         std::cout << "we have matched the MC particles!" << std::endl;
+        TLorentzVector trueStartPos = mcParticle->Position(0);
+        TLorentzVector trueEndPos = mcParticle->EndPosition();
+        trueStartPosX.push_back(trueStartPos.X());
+        trueStartPosY.push_back(trueStartPos.Y());
+        trueStartPosZ.push_back(trueStartPos.Z());
+        trueEndPosX.push_back(trueEndPos.X());
+        trueEndPosY.push_back(trueEndPos.Y());
+        trueEndPosZ.push_back(trueEndPos.Z());
+
+        energyMC.push_back(mcParticle->E());
       }
       else
       {
         std::cout << "MC particle not matched" << std::endl;
+        trueStartPosX.push_back(-999);
+        trueStartPosY.push_back(-999);
+        trueStartPosZ.push_back(-999);
+        trueEndPosX.push_back(-999);
+        trueEndPosY.push_back(-999);
+        trueEndPosZ.push_back(-999);
+        energyMC.push_back(-999);
       }
 
     }
   }
 
-  fOutTree->Fill();
+  totalEvents++;
+  fOutTree->Fill(); // fill the root tree with the outputs
 }
 
+//Maybe do some stuff here???
 void protoana::pi0TestSelection::endJob()
 {
 

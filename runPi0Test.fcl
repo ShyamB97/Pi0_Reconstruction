@@ -16,6 +16,14 @@ services:
                         @table::protodune_services
   PdspChannelMapService:@local::pdspchannelmap
   ChannelStatusService: @local::pdsp_channel_status
+  BackTrackerService: {
+    BackTracker: {
+      SimChannelModuleLabel: "tpcrawdecoder:simpleSC"
+      G4ModuleLabel: "largeant"
+      MinimumHitEnergyFraction: 1e-1
+    }
+  }
+
 }
 services.message.destinations.LogStandardOut.threshold: "INFO"
 #services.Geometry: @local::protodunev6_geo
@@ -32,12 +40,12 @@ physics:
 {
  analyzers:
  {
-  anaMod:          @local::pi0_test_selection
+  pduneana:          @local::pi0_test_selection
   # beamtruth:        @local::ProtoDUNETruthBeamParticle_params
  }
 
  # ana2:  [ anaMod, beamtruth ]
- pi0Ana: [anaMod]
+ pi0Ana: [pduneana]
 
  end_paths:     [ pi0Ana ]
 }
