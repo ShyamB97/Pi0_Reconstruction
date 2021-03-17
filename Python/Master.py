@@ -20,7 +20,7 @@ class Vector3:
         self.z = z
 
 
-def GetData(file, name, unwrap=False):
+def GetData(file, name, convert=False, unwrap=False):
     """
     Get dataset from ROOT file. will unwrap if needed.
     ----- Parameters -----
@@ -34,6 +34,12 @@ def GetData(file, name, unwrap=False):
     file = uproot.open(file)
     tree_pduneana = file['pduneana/beamana']
     data = tree_pduneana[name].arrays(library="np")[name]
+    
+    # converts the top level data into a list
+    # needed to convert from stlVectors(c++ nested vectors) to lists
+    if convert is True:
+        for i in range(len(data)):
+            data[i] = data[i].tolist()
     
     # consider removing
     if unwrap is True:
@@ -122,3 +128,77 @@ class Data:
             GetData(self.filename, "reco_beam_endY"),
             GetData(self.filename, "reco_beam_endZ")
             )
+    
+    # quantities to calculate cylinder hits
+    def hit_radial(self):
+        return GetData(self.filename, "hitRadial", convert=True)
+    def hit_longitudinal(self):
+        return GetData(self.filename, "hitLongitudinal", convert=True)
+    
+    # CNN score without averaging the track and EM score (i.e. not the same way as done in PDSPAnalyser.py)
+    def CNNScore(self):
+        return GetData(self.filename, "CNNScore")
+
+
+class Selection:
+    """
+    Selection function. Applies a cut wrt the value on data. Either greater than
+    or less than.
+    ----- Parameters -----
+    selected_data       : data post selection
+    evt                 : data per event
+    new_evt             : selected data per event
+    beamData            : if the data is event level only i.e. not daughter data,
+                          important since beam data and daughter data have different
+                          struture in the per event data.
+    ----------------------
+    """
+    def __init__(self, parameter, cut, greater=True):
+        self.parameter = parameter
+        self.cut = cut
+        self.greater = greater
+
+
+    def Cut(self, data, beamData):
+
+        selected_data = []
+        for i in range(len(self.parameter)):
+            evt = data[i]
+            evt_value = self.parameter[i]
+            new_evt = []
+            for j in range(len(evt_value)):
+    
+                if self.greater is True and evt_value[j] > self.cut:
+                    if beamData is True:
+                        selected_data.append(evt)
+                        break
+                    else:
+                        new_evt.append(evt[j])
+    
+                if self.greater is False and evt_value[j] < self.cut:
+                    if beamData is True:
+                        selected_data.append(evt)
+                        break
+                    else:
+                        new_evt.append(evt[j])
+    
+            if len(new_evt) > 0:
+                selected_data.append(new_evt)
+        return np.array(selected_data, object)
+
+
+    def CutVector(self, data, beamData):
+
+        selected_data = Vector3(self.Cut(data.x, beamData), 
+                                self.Cut(data.y, beamData), 
+                                self.Cut(data.z, beamData))
+        return selected_data
+
+
+    def Apply(self, data, beamData=False):
+        
+        if type(data) is Vector3:
+            selected_data = self.CutVector(data, beamData)
+        else:
+            selected_data = self.Cut(data, beamData)
+        return selected_data
