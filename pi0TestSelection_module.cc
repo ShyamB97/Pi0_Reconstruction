@@ -357,9 +357,9 @@ void protoana::pi0TestSelection::beginJob()
 
   // track-shower identification
   fOutTree->Branch("pandoraTag", &pandoraTags);
-  fOutTree->Branch("reco_daughter_PFP_emScore", &emScore);
-  fOutTree->Branch("reco_daughter_PFP_trackScore", &trackScore);
-  fOutTree->Branch("CNNScore", &CNNScore);
+  fOutTree->Branch("reco_daughter_PFP_emScore_collection", &emScore);
+  fOutTree->Branch("reco_daughter_PFP_trackScore_collection", &trackScore);
+  fOutTree->Branch("CNNScore_collection", &CNNScore);
 
   // shower start position
   fOutTree->Branch("reco_daughter_allShower_startX", &startPosX);
