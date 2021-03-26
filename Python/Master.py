@@ -8,6 +8,13 @@ Created on Thu Feb 25 13:50:53 2021
 
 import uproot
 import numpy as np
+from enum import Enum
+
+class Conditional(Enum):
+    GREATER = 1
+    LESS = 2
+    EQUAL = 3
+    NOT_EQUAL = 4
 
 
 class Vector3:
@@ -97,9 +104,9 @@ class Data:
     def nHits(self):
         return GetData(self.filename, "reco_daughter_PFP_nHits_collection")
     def cnn_em(self):
-        return GetData(self.filename, "reco_daughter_PFP_emScore")
+        return GetData(self.filename, "reco_daughter_PFP_emScore_collection")
     def cnn_track(self):
-        return GetData(self.filename, "reco_daughter_PFP_trackScore")
+        return GetData(self.filename, "reco_daughter_PFP_trackScore_collection")
 
     # mc truth daughter data
     def true_start_pos(self):
@@ -129,6 +136,9 @@ class Data:
             GetData(self.filename, "reco_beam_endZ")
             )
     
+    def pandoraTag(self):
+        return GetData(self.filename, "pandoraTag")
+    
     # quantities to calculate cylinder hits
     def hit_radial(self):
         return GetData(self.filename, "hitRadial", convert=True)
@@ -140,6 +150,7 @@ class Data:
         return GetData(self.filename, "CNNScore")
 
 
+### OLD SELECTION CLASS ###
 class Selection:
     """
     Selection function. Applies a cut wrt the value on data. Either greater than
@@ -182,6 +193,7 @@ class Selection:
                     else:
                         new_evt.append(evt[j])
     
+            new_evt = np.array(new_evt)
             if len(new_evt) > 0:
                 selected_data.append(new_evt)
         return np.array(selected_data, object)
@@ -202,3 +214,71 @@ class Selection:
         else:
             selected_data = self.Cut(data, beamData)
         return selected_data
+
+
+class SelectionMask:
+    def __init__(self, mask=None):
+        if mask is None:
+            mask = []
+        self.mask = mask
+
+    def InitiliseMask(self, reference):
+        for i in range(len(reference)):
+            evt_mask = np.ones(reference[i].shape)
+            self.mask.append(evt_mask)        
+        self.mask = np.array(self.mask, object)
+    
+    def CutMask(self, parameter, cut, conditional):
+        for i in range(len(parameter)):
+            evt_parameter = parameter[i]
+            evt_mask = self.mask[i]
+            for j in range(len(evt_parameter)):
+                
+                if conditional == Conditional.EQUAL and evt_parameter[j] != cut:
+                    evt_mask[j] = 0
+                    
+                if conditional == Conditional.NOT_EQUAL and evt_parameter[j] == cut:
+                    evt_mask[j] = 0
+                
+                if conditional == Conditional.LESS and evt_parameter[j] > cut:
+                    evt_mask[j] = 0
+                
+                if conditional == Conditional.GREATER and evt_parameter[j] < cut:
+                    evt_mask[j] = 0
+
+    def ApplyMask(self, data, beamData):
+        selected_data = []
+        for i in range(len(self.mask)):
+            evt_mask = self.mask[i]
+            evt_data = data[i]
+            new_evt = []
+            for j in range(len(evt_mask)):
+                if evt_mask[j] == 1:
+                    if beamData is True:
+                        selected_data.append(evt_data)
+                        break
+                    else:
+                        new_evt.append(evt_data[j])
+            selected_data.append( np.array(new_evt) )
+
+        return np.array(selected_data, object)
+
+    def ApplyMaskVector(self, data, beamData):
+        selected_data = Vector3(self.ApplyMask(data.x, beamData), 
+                        self.ApplyMask(data.y, beamData), 
+                        self.ApplyMask(data.z, beamData))
+        return selected_data
+
+    def Apply(self, data, beamData=False):
+        if type(data) is Vector3:
+            selected_data = self.ApplyMaskVector(data, beamData)
+        else:
+            selected_data = self.ApplyMask(data, beamData)
+        return selected_data
+
+    def ApplyMaskToSelf(self):
+        self.mask = self.ApplyMask(self.mask)
+
+
+
+
