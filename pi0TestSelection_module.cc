@@ -79,7 +79,7 @@ class protoana::pi0TestSelection : public art::EDAnalyzer {
   int PandoraIdentification(const recob::PFParticle &daughterPFP, const art::Event &evt);
   std::vector<double> CNNScoreCalculator(anab::MVAReader<recob::Hit,4> &hitResults, const std::vector< art::Ptr< recob::Hit > > &hits, unsigned int &n);
   std::vector<double> StartHitQuantityCalculator(TVector3 &hitStart, TVector3 &hit, TVector3 &direction);
-  double ShowerEnergyCalculator(std::vector<art::Ptr<recob::Hit> > &hits, const detinfo::DetectorPropertiesData &detProp, art::FindManyP<recob::SpacePoint> &spFromHits);
+  double ShowerEnergyCalculator(const std::vector<art::Ptr<recob::Hit> > &hits, const detinfo::DetectorPropertiesData &detProp, art::FindManyP<recob::SpacePoint> &spFromHits);
   void reset();
 
   private:
@@ -177,9 +177,43 @@ protoana::pi0TestSelection::pi0TestSelection(fhicl::ParameterSet const & p)
   fBeamlineUtils(p.get<fhicl::ParameterSet>("BeamlineUtils"))
 { }
 
+struct cnnOutput2D{
+
+  cnnOutput2D();
+
+  double track;
+  double em;
+  double michel;
+  double none;
+  size_t nHits;
+
+};
+
+cnnOutput2D::cnnOutput2D() : track(0), em(0), michel(0), none(0), nHits(0) { }
+
+
+cnnOutput2D GetCNNOutputFromPFParticleFromPlane( const recob::PFParticle & part, const art::Event & evt, const anab::MVAReader<recob::Hit,4> & CNN_results,  protoana::ProtoDUNEPFParticleUtils & pfpUtil, std::string fPFParticleTag, size_t planeID ){
+
+  cnnOutput2D output;
+  const std::vector< art::Ptr< recob::Hit > > daughterPFP_hits = pfpUtil.GetPFParticleHitsFromPlane_Ptrs( part, evt, fPFParticleTag, planeID );
+
+  for( size_t h = 0; h < daughterPFP_hits.size(); ++h ){
+
+    std::array<float,4> cnn_out = CNN_results.getOutput( daughterPFP_hits[h] );
+    output.track  += cnn_out[ CNN_results.getIndex("track") ];
+    output.em     += cnn_out[ CNN_results.getIndex("em") ];
+    output.michel += cnn_out[ CNN_results.getIndex("michel") ];
+    output.none   += cnn_out[ CNN_results.getIndex("none") ];
+
+  }
+  output.nHits = daughterPFP_hits.size();
+  return output;
+}
+
+
 
 // shower energy calculation, taken from Jake Calcutt's PDPSPAnalyser
-double protoana::pi0TestSelection::ShowerEnergyCalculator(std::vector<art::Ptr<recob::Hit> > &hits, const detinfo::DetectorPropertiesData &detProp, art::FindManyP<recob::SpacePoint> &spFromHits)
+double protoana::pi0TestSelection::ShowerEnergyCalculator(const std::vector<art::Ptr<recob::Hit> > &hits, const detinfo::DetectorPropertiesData &detProp, art::FindManyP<recob::SpacePoint> &spFromHits)
 {
   std::vector<double> x_vec, y_vec, z_vec; // parameterised hit position vector for each hit
   double total_y = 0;
@@ -241,6 +275,7 @@ double protoana::pi0TestSelection::ShowerEnergyCalculator(std::vector<art::Ptr<r
   }
   return total_energy;
 }
+
 
 // track/shower identification done thorugh pandora, returns 11 for a shower and 13 for a track
 int protoana::pi0TestSelection::PandoraIdentification(const recob::PFParticle &daughterPFP, const art::Event &evt)
@@ -485,17 +520,31 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
     pandoraTags.push_back(PandoraIdentification(*daughterPFP, evt));
 
     // number of collection plane hits
-    auto hits = pfpUtil.GetPFParticleHitsFromPlane_Ptrs( *daughterPFP, evt, fPFParticleTag, 2 ); // get collection plane hit objects for the daughter
-    unsigned int num = hits.size(); // number of hits
+    auto collection_hits = pfpUtil.GetPFParticleHitsFromPlane_Ptrs( *daughterPFP, evt, fPFParticleTag, 2 ); // get collection plane hit objects for the daughter
+    unsigned int num = collection_hits.size(); // number of hits
     nHits.push_back(num);
     std::cout << "collection plane hits: " << num << std::endl;
     
+    /*
     // calculate cnn score
-    std::vector<double> cnnOutput = CNNScoreCalculator(hitResults, hits, num);
+    std::vector<double> cnnOutput = CNNScoreCalculator(hitResults, collection_hits, num);
     CNNScore.push_back(cnnOutput[0]);
     // also output the average and em track score to calculate it the way done in python
     emScore.push_back(cnnOutput[1]);
     trackScore.push_back(cnnOutput[2]);
+    */
+
+    cnnOutput2D cnn_collection = GetCNNOutputFromPFParticleFromPlane(*daughterPFP, evt, hitResults, pfpUtil, fPFParticleTag, 2);
+
+    double track_score_collection = (cnn_collection.nHits > 0 ?
+                          (cnn_collection.track / cnn_collection.nHits) :
+                          -999.);
+    double em_score_collection = (cnn_collection.nHits > 0 ?
+                          (cnn_collection.em / cnn_collection.nHits) :
+                          -999.);
+    trackScore.push_back(track_score_collection);
+    emScore.push_back(em_score_collection);
+
 
     const recob::Shower* shower = 0x0; // intilise the forced shower object
     std::cout << "Getting shower" << std::endl;
@@ -503,11 +552,12 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
     try
     {
       shower =	pfpUtil.GetPFParticleShower(*daughterPFP, evt, fPFParticleTag, "pandora2Shower");
-      art::FindManyP<recob::SpacePoint> spFromHits(hits, evt, fHitTag); // get space point objects of the hits
 
       if(shower)
       {
         std::cout << "got shower" << std::endl;
+        const std::vector<art::Ptr<recob::Hit> > showerHits = showerUtil.GetRecoShowerArtHits(*shower, evt, "pandora2Shower");
+        art::FindManyP<recob::SpacePoint> spFromHits(showerHits, evt, fHitTag); // get space point objects of the hits
 
         std::cout << "getting start and direction" << std::endl;
         TVector3 showerStart = shower->ShowerStart();
@@ -525,7 +575,7 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
         // calculates quantities needed to compute the start hits <move to function?>
         std::vector<double> hitRad; // magnitudes of cross product of hit positions and shower direction
         std::vector<double> hitLong; // dot product of of hit positions and shower direction
-        for(unsigned int n = 0; n < hits.size(); n++)
+        for(unsigned int n = 0; n < collection_hits.size(); n++)
         {
           std::vector<art::Ptr<recob::SpacePoint>> sps = spFromHits.at(n); // get nth space point
 
@@ -549,7 +599,7 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
         hitLongitudinal.push_back(hitLong);
 
         // calculate and push back shower energy
-        energy.push_back(ShowerEnergyCalculator(hits, detProp, spFromHits););
+        energy.push_back(ShowerEnergyCalculator(showerHits, detProp, spFromHits));
       }
       else
       {

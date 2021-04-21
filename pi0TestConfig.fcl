@@ -15,13 +15,15 @@ pi0_test_selection:
    HitTag:                  "hitpdune"
    PFParticleTag:           "pandora"
    GeneratorTag:            "generator"
-   CalorimetryTagSCE:       "pandoracalo"
+   CalorimetryTagSCE:       "pandoracalinoxyzt"
    Verbose:                 true
    BeamlineUtils:        @local::standard_protodunebeamlineutils
    momentum:				1
 
-   CalibrationParsSCE: @local::CalorimetryParameters_SPProd2_MC_SCE
-   CalibrationParsSCE: @local::CalorimetryParameters_SPProd2_MC_35ms
+   CalibrationParsSCE: @local::CalorimetryParameters_SPProd4_MC_SCE
+
+   #CalibrationParsSCE: @local::CalorimetryParameters_SPProd2_MC_SCE
+   #CalibrationParsSCE: @local::CalorimetryParameters_SPProd2_MC_35ms
 
 }
 
