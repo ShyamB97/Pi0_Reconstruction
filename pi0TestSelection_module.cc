@@ -457,17 +457,17 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
   // Get only Beam particle by checking the Beam slices
   std::vector<const recob::PFParticle*> beamParticles = pfpUtil.GetPFParticlesFromBeamSlice(evt, fPFParticleTag);
   
-  if(beamParticles.size() > 1)
-  {
-    // consider support for this edge case (if this even occurs?)
-    std::cout << "there shouldn't be more than one beam particle" << std::endl;
-  }
   if(beamParticles.size() == 0)
   {
     // nothing to do for this event
     std::cout << "no beam particle, moving on..." << std::endl;
     totalEvents ++;
     return;
+  }
+  if(beamParticles.size() > 1)
+  {
+    // consider support for this edge case (if this even occurs?)
+    std::cout << "there shouldn't be more than one beam particle" << std::endl;
   }
   auto beamParticle = beamParticles[0]; // get the first beam particle (if exists)
   beamEvents ++;
@@ -479,7 +479,11 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
   // store beam track info
   if(!beamTrack)
   {
+    /* Temporary line to stop recodring data if no beam is found */
     std::cout<< "no beam track found, moving on" << std::endl;
+    MF_LOG_WARNING("Pi0TestSelection") << "no beam track found, moving on" << std::endl;
+    return;
+    /* ----------------------------------------------------------*/
     beamStartPosX = -999;
     beamStartPosY = -999;
     beamStartPosZ = -999;
@@ -629,6 +633,19 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
   // store any MC reated information here i.e. MC truth info
   if(!evt.isRealData())
   {
+
+    const simb::MCParticle* true_beam_particle = 0x0;
+    auto mcTruths = evt.getValidHandle<std::vector<simb::MCTruth>>(fGeneratorTag);
+    true_beam_particle = truthUtil.GetGeantGoodParticle((*mcTruths)[0],evt);
+    if( !true_beam_particle ){
+      std::cout << "No true beam particle" << std::endl;
+      return;
+    }
+    else
+    {
+      std::cout << "Found true Beam particle" << std::endl;
+    }
+
     // backtrack each daughter PFParticle from the beam
     for( size_t daughterID : beamParticle->Daughters() )
     {
