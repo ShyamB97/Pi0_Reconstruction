@@ -589,8 +589,9 @@ def GetSHowerStartHits(hit_radial, hit_longitudinal, geometry=[1, -1, 4]):
         start_hits.append(evt_hits)
 
 
-#data = Master.Data("pduneana_Prod4_1GeV_2_9_21.root")
-data = Master.Data("pi0Test_output_PDSPProd4_MC_1GeV_SCE_DataDriven_reco_1K_1_24_03_21.root")
+#data = Master.Data("ROOTFiles/pduneana_Prod4_1GeV_2_9_21.root")
+#data = Master.Data("pi0Test_output_PDSPProd4_MC_1GeV_SCE_DataDriven_reco_1K_1_24_03_21.root")
+data = Master.Data("ROOTFiles/pi0Test_output_PDSPProd4_MC_1GeV_SCE_DataDriven_reco_3p5K_21_04_21.root");
 
 r = 1 # cm
 l_min = -1 # cm
@@ -625,6 +626,7 @@ mask.InitiliseMask(nHits)
 
 
 #Calculated quantities
+
 print("calculating cnn_score...")
 cnn_em = data.cnn_em()
 cnn_track = data.cnn_track()
@@ -638,7 +640,7 @@ cnn_em = mask999.Apply(cnn_em)
 cnn_track = mask999.Apply(cnn_track)
 
 cnn_score = CNNScore(cnn_em, cnn_track)
-
+"""
 
 # cut the mask (1 -> 0) by selecting data via a conditional
 mask.CutMask(cnn_score, 0.6, Conditional.GREATER)
@@ -657,7 +659,7 @@ beam_end_pos = mask.Apply(beam_end_pos, True)
 
 true_start_pos = mask.Apply(true_start_pos)
 true_end_pos = mask.Apply(true_end_pos)
-
+"""
 
 """
 # apply selection to all the data
@@ -680,7 +682,7 @@ true_start_pos = cnnSelection.Apply(true_start_pos)
 true_end_pos = cnnSelection.Apply(true_end_pos)
 """
 
-
+"""
 print("energy residual")
 energyResidual = Unwrap( (energy - mc_energy)/ mc_energy )
 
@@ -705,7 +707,7 @@ pair_second = Unwrap(pair_second) / 1000
 
 print("Invariant mass")
 inv_mass = Unwrap(InvariantMass(start_pos, direction, energy))
-
+"""
 
 """
 pair_separation = pair_separation[pair_separation > 0]
@@ -738,10 +740,10 @@ PlotHist(pair_angle, 100, "Angle between shower pairs (rad)")
 beam_angle = beam_angle[beam_angle != -999]
 PlotHist(beam_angle, 100, "Angle between beam track and daughter shower (rad)")
 """
-"""
+
 cnn_score = Unwrap(cnn_score)
 PlotHist(cnn_score, 100, "CNN scores of beam daughters")
-"""
+
 """
 nHits = Unwrap(nHits)
 nHits = nHits[nHits != 0]
@@ -755,10 +757,10 @@ pair_second = pair_second[pair_second > 0]
 #plt.figure(2, (10, 5))
 
 #plt.subplot(122)
-_, edges = PlotHist(pair_second, title="(b)", label="shower with the least energy in a pair", alpha=0.5)
+_, edges = PlotHist(pair_second, label="shower with the least energy in a pair", alpha=0.5)
 
 #plt.subplot(121)
-PlotHist(pair_leading, edges, xlabel="Shower energy (GeV)", title="(a)", label="shower with the most energy in a pair", alpha=0.5)
+PlotHist(pair_leading, edges, xlabel="Shower energy (GeV)", label="shower with the most energy in a pair", alpha=0.5)
 
 plt.legend()
 plt.tight_layout()
