@@ -6,6 +6,8 @@ Created on Fri Feb 12 09:49:07 2021
 @author: sb16165
 """
 
+import sys
+import os
 import time
 import numpy as np
 import matplotlib
@@ -18,10 +20,37 @@ from Master import Unwrap, Vector3, Conditional
 import SelectionQuantities
 from Plots import Plot, PlotHist, PlotHist2D
 
+def save(name):
+    out = subDirectory + name + reference_filename + ".png"
+    plt.savefig(out)
+    plt.close()
+
+
+# handle command line imports
+args = sys.argv
+
+if "--help" in args or len(args) == 1:
+    print("usage: --file <root file> --outName <file name to append> --outDir <output directory>")
+    exit(0)
+if "--file" in args:
+    root_filename = args[args.index("--file") + 1]
+    print(root_filename)
+else:
+    print("no file chosen!")
+    exit(1)
+if "--outName" in args:
+    reference_filename = args[args.index("--outName") + 1]
+else:
+    reference_filename = "_" + root_filename[19:-5]
+if "--outDir" in args:
+    subDirectory = args[args.index("--outDir") + 1] + "/ "
+else:
+    subDirectory = root_filename[19:-5] + "/"
+
+
 start_time = time.time()
-root_filename = "pi0Test_output_PDSPProd4_MC_1GeV_SCE_DataDriven_reco_1K_1_24_03_21.root"
-#root_filename = "pduneana_Prod4_1GeV_2_9_21.root"
 print("Opening root file: " + root_filename)
+os.makedirs(subDirectory, exist_ok=True)
 data = Master.Data(root_filename)
 
 
@@ -59,7 +88,7 @@ cnn_track = mask999.Apply(cnn_track)
 
 cnn_score = SelectionQuantities.CNNScore(cnn_em, cnn_track)
 
-
+"""
 # select data based on cnn score
 mask.CutMask(cnn_score, 0.6, Conditional.GREATER)
 
@@ -78,7 +107,7 @@ beam_end_pos = mask.Apply(beam_end_pos, True)
 
 true_start_pos = mask.Apply(true_start_pos)
 true_end_pos = mask.Apply(true_end_pos)
-
+"""
 
 # calculate quantities from selected data
 nHits = Unwrap(nHits)
@@ -110,72 +139,52 @@ inv_mass = Unwrap(SelectionQuantities.InvariantMass(start_pos, direction, energy
 
 
 # save plots of data
-print("Saving Plots...")
-reference_filename = "_" + root_filename[19:-5]
-subDirectory = root_filename[19:-5] + "/"
-#reference_filename = "_pduneana_Prod4_1GeV_2_9_21"
-#subDirectory = "pduneana_Prod4_1GeV_2_9_21/"
+print("Saving Plots:")
 nbins = 100
 
 print("CNN score")
 cnn_score = Unwrap(cnn_score)
 PlotHist(cnn_score, nbins, "CNN scores of beam daughters")
-name = subDirectory + "cnn_score" + reference_filename + ".png"
-plt.savefig(name)
-plt.close()
+save("cnn_score")
 
 
 print("collection plane hits")
 nHits_plot = nHits[nHits != 0]
 PlotHist(nHits_plot[nHits_plot < 101], nbins, "Number of collection plane hits")
-name = subDirectory + "collection_hits" + reference_filename + ".png"
-plt.savefig(name)
-plt.close()
+save("collection_hits")
 
 
 print("hits vs mc angle")
 PlotHist2D(nHits, mc_angle, nbins, [-999, 510], [0, np.pi], "Number of collection plane hits", "Angle between shower and MC parent (rad)")
-name = subDirectory + "hits_vs_mcAngle" + reference_filename + ".png"
-plt.savefig(name)
-plt.close()
+save("hits_vs_mcAngle")
 
 
 print("hits vs beam angle")
 PlotHist2D(nHits, beam_angle, nbins, [-999, 501], [0, np.pi], "Number of collection plane hits", "Angle between beam track and daughter shower (rad)")
-name = subDirectory + "hits_vs_beamAngle" + reference_filename + ".png"
-plt.savefig(name)
-plt.close()
+save("hits_vs_beamAngle")
 
 
 print("hits vs energy residual")
 PlotHist2D(nHits, energyResidual, nbins, [-999, 501], [-1, 1], "Number of collection plane hits", "Reconstruted energy residual")
-name = subDirectory + "hits_vs_energyRes" + reference_filename + ".png"
-plt.savefig(name)
-plt.close()
+save("hits_vs_energyRes")
 
 
 print("beam angle")
 beam_angle = beam_angle[beam_angle != -999]
 PlotHist(beam_angle, nbins, "Angle between beam track and daughter shower (rad)")
-name = subDirectory + "beam_daughterAngle" + reference_filename + ".png"
-plt.savefig(name)
-plt.close()
+save("beam_daughterAngle")
 
 
 print("pair separation")
 pair_separation = pair_separation[pair_separation > 0]
 PlotHist(pair_separation[pair_separation < 51], nbins, "Shower pair Separation (cm)")
-name = subDirectory + "pair_separation" + reference_filename + ".png"
-plt.savefig(name)
-plt.close()
+save("pair_separation")
 
 
 print("pair angle")
 pair_angle = pair_angle[pair_angle != -999]
 PlotHist(pair_angle, nbins, "Angle between shower pairs (rad)")
-name = subDirectory + "shower_pairAngle" + reference_filename + ".png"
-plt.savefig(name)
-plt.close()
+save("shower_pairAngle")
 
 
 print("pair energies")
@@ -185,17 +194,13 @@ _, edges = PlotHist(pair_second, label="shower with the least energy in a pair",
 PlotHist(pair_leading, edges, xlabel="Shower energy (GeV)", label="shower with the most energy in a pair", alpha=0.5)
 plt.legend()
 plt.tight_layout()
-name = subDirectory + "daughter_energies" + reference_filename + ".png"
-plt.savefig(name)
-plt.close()
+save("daughter_energies")
 
 
 print("invariant mass")
 inv_mass = inv_mass[inv_mass > 0] / 1000
 PlotHist(inv_mass[inv_mass < 0.5], nbins, "Shower pair invariant mass (GeV)", "", 3)
-name = subDirectory + "inv_mass" + reference_filename + ".png"
-plt.savefig(name)
-plt.close()
+save("inv_mass")
 
 print("done!")
 print("ran in %s seconds. " % (time.time() - start_time) )
