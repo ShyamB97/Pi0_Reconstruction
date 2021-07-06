@@ -989,69 +989,7 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
   std::cout << "got clockData" << std::endl;
   auto const detProp =  art::ServiceHandle<detinfo::DetectorPropertiesService>()->DataFor(evt, clockData); // object containing physical proteties of the detector
 
-<<<<<<< HEAD
   anab::MVAReader<recob::Hit,4> hitResults(evt, "emtrkmichelid:emtrkmichel"); // info for CNN score calculation
-=======
-  // Get only Beam particle by checking the Beam slices
-  std::vector<const recob::PFParticle*> beamParticles = pfpUtil.GetPFParticlesFromBeamSlice(evt, fPFParticleTag);
-  
-  if(beamParticles.size() == 0)
-  {
-    // nothing to do for this event
-    std::cout << "no beam particle, moving on..." << std::endl;
-    totalEvents ++;
-    return;
-  }
-  if(beamParticles.size() > 1)
-  {
-    // consider support for this edge case (if this even occurs?)
-    std::cout << "there shouldn't be more than one beam particle" << std::endl;
-  }
-  auto beamParticle = beamParticles[0]; // get the first beam particle (if exists)
-  beamEvents ++;
-  pdgs.push_back(beamParticle->PdgCode()); // get ID of particles
-
-  const recob::Track* beamTrack = 0x0; // set to null
-  beamTrack = pfpUtil.GetPFParticleTrack(*beamParticle, evt, fPFParticleTag, fTrackerTag); // get the beam track if it exists
-
-  // store beam track info
-  if(!beamTrack)
-  {
-    /* Temporary line to stop recodring data if no beam is found */
-    std::cout<< "no beam track found, moving on" << std::endl;
-    MF_LOG_WARNING("Pi0TestSelection") << "no beam track found, moving on" << std::endl;
-    return;
-    /* ----------------------------------------------------------*/
-    beamStartPosX = -999;
-    beamStartPosY = -999;
-    beamStartPosZ = -999;
-    beamEndPosX = -999;
-    beamEndPosY = -999;
-    beamEndPosZ = -999;
-  }
-  else
-  {
-    beamStartPosX = beamTrack->Trajectory().Start().X();
-    beamStartPosY = beamTrack->Trajectory().Start().Y();
-    beamStartPosZ = beamTrack->Trajectory().Start().Z();
-    beamEndPosX = beamTrack->Trajectory().End().X();
-    beamEndPosY = beamTrack->Trajectory().End().Y();
-    beamEndPosZ = beamTrack->Trajectory().End().Z();
-
-    // if the beam enters from the opposite direction
-    if(beamStartPosZ > beamEndPosZ)
-    {
-      beamStartPosX = beamTrack->Trajectory().End().X();
-      beamStartPosY = beamTrack->Trajectory().End().Y();
-      beamStartPosZ = beamTrack->Trajectory().End().Z();
-      beamEndPosX = beamTrack->Trajectory().Start().X();
-      beamEndPosY = beamTrack->Trajectory().Start().Y();
-      beamEndPosZ = beamTrack->Trajectory().Start().Z();
-    }
-  }
-
-  anab::MVAReader<recob::Hit,4> hitResults(evt, "emtrkmichelid:emtrkmichel");
->>>>>>> 4f934396bb2b881d6f0457cce6df8fe1819994a9
 
   // checks beam event info from the generator and data, not used for particle gun tests
   if(!fPi0Only)
@@ -1082,7 +1020,6 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
 
   if(fAnalyseFromBeam)
   {
-<<<<<<< HEAD
     // Analyse PFParticles daughters of the beam
     AnalyseFromBeam(evt, clockData, detProp, hitResults, *pfpVec);
   }
@@ -1092,23 +1029,6 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
     //AnalyseAllPFP(evt, clockData, detProp, hitResults, *pfpVec);
     //std::vector<recob::PFParticle> Parents;
     for(recob::PFParticle pfp : *pfpVec)
-=======
-
-    const simb::MCParticle* true_beam_particle = 0x0;
-    auto mcTruths = evt.getValidHandle<std::vector<simb::MCTruth>>(fGeneratorTag);
-    true_beam_particle = truthUtil.GetGeantGoodParticle((*mcTruths)[0],evt);
-    if( !true_beam_particle ){
-      std::cout << "No true beam particle" << std::endl;
-      return;
-    }
-    else
-    {
-      std::cout << "Found true Beam particle" << std::endl;
-    }
-
-    // backtrack each daughter PFParticle from the beam
-    for( size_t daughterID : beamParticle->Daughters() )
->>>>>>> 4f934396bb2b881d6f0457cce6df8fe1819994a9
     {
       //std::cout << "is primary? " << pfp.IsPrimary() << std::endl; 
       if(pfp.IsPrimary())
