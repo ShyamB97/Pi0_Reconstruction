@@ -1,4 +1,5 @@
-art_make(BASENAME_ONLY
+art_make(Pi0Analyser "module"
+  BASENAME_ONLY
   MODULE_LIBRARIES
   ${ART_FRAMEWORK_CORE}
   ${ART_FRAMEWORK_PRINCIPAL}
@@ -28,5 +29,4 @@ art_make(BASENAME_ONLY
 install_headers()
 install_fhicl()
 install_source()
-
 

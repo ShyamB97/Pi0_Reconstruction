@@ -42,25 +42,25 @@ source:
 physics:
 {
 
- filters: {
-   fTruth: @local::beam_filter
- }
+ #filters: {
+ #  fTruth: @local::beam_filter
+ #}
 
- fpath: [fTruth]
+ #fpath: [fTruth]
 
  analyzers:
  {
   pduneana:          @local::pi0_test_selection
-  beamtruth:        @local::ProtoDUNETruthBeamParticle_params
+  # beamtruth:        @local::ProtoDUNETruthBeamParticle_params
  }
 
- #ana2:  [ anaMod, beamtruth ]
+ # ana2:  [ anaMod, beamtruth ]
  pi0Ana: [pduneana]
 
  end_paths:     [ pi0Ana ]
 }
 
 outputs: {}
-physics.filters.fTruth.PDG: [211, -13, 2212]
-physics.analyzers.pduneana.SelectEvents: ["fpath"]
-services.ParticleInventoryService.ParticleInventory.EveIdCalculator: "EmEveIdCalculator"
+#physics.filters.fTruth.PDG: [211, -13, 2212]
+#physics.analyzers.pduneana.SelectEvents: ["fpath"]
+#services.ParticleInventoryService.ParticleInventory.EveIdCalculator: "EmEveIdCalculator"

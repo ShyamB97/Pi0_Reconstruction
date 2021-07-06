@@ -31,6 +31,7 @@
 #include "lardataobj/AnalysisBase/Calorimetry.h"
 #include "lardataobj/RecoBase/OpFlash.h"
 #include "larcore/Geometry/Geometry.h"
+#include "larreco/RecoAlg/TrackMomentumCalculator.h"
 
 //protoDUNE analysis headers
 #include "protoduneana/Utilities/ProtoDUNETrackUtils.h"
@@ -50,6 +51,8 @@
 
 //Use this to get CNN numbers
 #include "lardata/ArtDataHelper/MVAReader.h"
+
+#include <algorithm>
 
 namespace protoana {
   class pi0TestSelection;
@@ -82,6 +85,15 @@ class protoana::pi0TestSelection : public art::EDAnalyzer {
   double ShowerEnergyCalculator(const std::vector<art::Ptr<recob::Hit> > &hits, const detinfo::DetectorPropertiesData &detProp, art::FindManyP<recob::SpacePoint> &spFromHits);
   void reset();
 
+  void AnalyseDaughterPFP(const recob::PFParticle &daughterPFP, const art::Event &evt, const detinfo::DetectorPropertiesData &detProp, anab::MVAReader<recob::Hit,4> &hitResults);
+  void AnalyseBeamPFP(const recob::PFParticle &beam, const art::Event &evt);
+  void AnalyseMCTruth(const recob::PFParticle &daughter, const art::Event &evt, const detinfo::DetectorClocksData &clockData);
+  void AnalyseMCTruthBeam(const art::Event &evt);
+  void CollectG4Particle(int Pdg);
+
+  void AnalyseFromBeam(const art::Event &evt, const detinfo::DetectorClocksData &clockData, const detinfo::DetectorPropertiesData &detProp, anab::MVAReader<recob::Hit,4> &hitResults, std::vector<recob::PFParticle> pfpVec);
+  void AnalyseAllPFP(const art::Event &evt, const detinfo::DetectorClocksData &clockData, const detinfo::DetectorPropertiesData &detProp, anab::MVAReader<recob::Hit,4> &hitResults, std::vector<recob::PFParticle> pfpVec);
+
   private:
 
   // fcl parameters, order matters!
@@ -98,6 +110,9 @@ class protoana::pi0TestSelection : public art::EDAnalyzer {
   art::ServiceHandle<cheat::BackTrackerService> bt_serv;
   art::ServiceHandle< cheat::ParticleInventoryService > pi_serv;
 
+  bool fPi0Only;
+  bool fAnalyseFromBeam;
+
   //Initialise protodune analysis utility classes
   protoana::ProtoDUNEPFParticleUtils pfpUtil;
   protoana::ProtoDUNETrackUtils trkUtil;
@@ -109,7 +124,7 @@ class protoana::pi0TestSelection : public art::EDAnalyzer {
   int nomialMomentum = 1;
   TTree *fOutTree = new TTree;
 
-  //meta-data
+  // meta-data
   std::vector<int> pdgs; // particle ids
   double totalEvents; // number of events processed
   double beamEvents; // number of events with beam particles
@@ -133,7 +148,6 @@ class protoana::pi0TestSelection : public art::EDAnalyzer {
   // hit/energy quantities
   std::vector<int> nHits; // number of collection plane hits
   std::vector<double> energy; // reco shower energy in ???
-  std::vector<double> energyMC; // mc shower energy in GeV
 
   // quantity used to calculate the number of start hits
   std::vector<std::vector<double>> hitRadial;
@@ -149,17 +163,62 @@ class protoana::pi0TestSelection : public art::EDAnalyzer {
   double beamEndPosY;
   double beamEndPosZ;
 
-  // true start position
-  std::vector<double> trueStartPosX;
-  std::vector<double> trueStartPosY;
-  std::vector<double> trueStartPosZ;
+  int trueBeamPdg;
+  std::vector<int> trueDaughterPdg;
 
-  // true end position
-  std::vector<double> trueEndPosX;
-  std::vector<double> trueEndPosY;
-  std::vector<double> trueEndPosZ;
+  double trueBeamEnergy;
+  std::vector<double> trueDaughterEnergy; // mc shower energy in GeV
+  double trueBeamMass;
+  std::vector<double> trueDaughterMass;
+
+  // true beam start positions
+  double trueBeamStartPosX;
+  double trueBeamStartPosY;
+  double trueBeamStartPosZ;
+
+  // true beam end positions
+  double trueBeamEndPosX;
+  double trueBeamEndPosY;
+  double trueBeamEndPosZ;
+
+  // true daughter start positions
+  std::vector<double> trueDaughterStartPosX;
+  std::vector<double> trueDaughterStartPosY;
+  std::vector<double> trueDaughterStartPosZ;
+
+  // true daughter end positions
+  std::vector<double> trueDaughterEndPosX;
+  std::vector<double> trueDaughterEndPosY;
+  std::vector<double> trueDaughterEndPosZ;
+
+  // true daughter momentum
+  std::vector<double> trueDaughterMomentumX;
+  std::vector<double> trueDaughterMomentumY;
+  std::vector<double> trueDaughterMomentumZ;
+
+  std::vector<int> G4ParticlePdg;
+  std::vector<double> G4ParticleEnergy;
+  std::vector<double> G4ParticleMass;
+
+  std::vector<double> G4ParticleStartPosX;
+  std::vector<double> G4ParticleStartPosY;
+  std::vector<double> G4ParticleStartPosZ;
+  
+  std::vector<double> G4ParticleEndPosX;
+  std::vector<double> G4ParticleEndPosY;
+  std::vector<double> G4ParticleEndPosZ;
+
+  std::vector<double> G4ParticleMomX;
+  std::vector<double> G4ParticleMomY;
+  std::vector<double> G4ParticleMomZ;
+
+
+  std::vector<double> G4ParticleNum;
+  std::vector<double> G4ParticleMother;
 
   unsigned int eventID;
+
+  //bool pi0Only = false;
 };
 
 
@@ -174,42 +233,10 @@ protoana::pi0TestSelection::pi0TestSelection(fhicl::ParameterSet const & p)
   fPFParticleTag(p.get<std::string>("PFParticleTag")),
   fGeneratorTag(p.get<std::string>("GeneratorTag")),
   fVerbose(p.get<bool>("Verbose")),
-  fBeamlineUtils(p.get<fhicl::ParameterSet>("BeamlineUtils"))
+  fBeamlineUtils(p.get<fhicl::ParameterSet>("BeamlineUtils")),
+  fPi0Only(p.get<bool>("Pi0Only")),
+  fAnalyseFromBeam(p.get<bool>("AnalyseFromBeam"))
 { }
-
-struct cnnOutput2D{
-
-  cnnOutput2D();
-
-  double track;
-  double em;
-  double michel;
-  double none;
-  size_t nHits;
-
-};
-
-cnnOutput2D::cnnOutput2D() : track(0), em(0), michel(0), none(0), nHits(0) { }
-
-
-cnnOutput2D GetCNNOutputFromPFParticleFromPlane( const recob::PFParticle & part, const art::Event & evt, const anab::MVAReader<recob::Hit,4> & CNN_results,  protoana::ProtoDUNEPFParticleUtils & pfpUtil, std::string fPFParticleTag, size_t planeID ){
-
-  cnnOutput2D output;
-  const std::vector< art::Ptr< recob::Hit > > daughterPFP_hits = pfpUtil.GetPFParticleHitsFromPlane_Ptrs( part, evt, fPFParticleTag, planeID );
-
-  for( size_t h = 0; h < daughterPFP_hits.size(); ++h ){
-
-    std::array<float,4> cnn_out = CNN_results.getOutput( daughterPFP_hits[h] );
-    output.track  += cnn_out[ CNN_results.getIndex("track") ];
-    output.em     += cnn_out[ CNN_results.getIndex("em") ];
-    output.michel += cnn_out[ CNN_results.getIndex("michel") ];
-    output.none   += cnn_out[ CNN_results.getIndex("none") ];
-
-  }
-  output.nHits = daughterPFP_hits.size();
-  return output;
-}
-
 
 
 // shower energy calculation, taken from Jake Calcutt's PDPSPAnalyser
@@ -362,20 +389,479 @@ void protoana::pi0TestSelection::reset()
   dirZ.clear();
 
   energy.clear();
-  energyMC.clear();
   nHits.clear();
 
   hitRadial.clear();
   hitLongitudinal.clear();
 
-  trueStartPosX.clear();
-  trueStartPosY.clear();
-  trueStartPosZ.clear();
-  
-  trueEndPosX.clear();
-  trueEndPosY.clear();
-  trueEndPosZ.clear();
+  trueDaughterPdg.clear();
+  trueDaughterMass.clear();
+  trueDaughterEnergy.clear();
 
+  trueDaughterStartPosX.clear();
+  trueDaughterStartPosY.clear();
+  trueDaughterStartPosZ.clear();
+  
+  trueDaughterEndPosX.clear();
+  trueDaughterEndPosY.clear();
+  trueDaughterEndPosZ.clear();
+
+  trueDaughterMomentumX.clear();
+  trueDaughterMomentumY.clear();
+  trueDaughterMomentumZ.clear();
+
+  G4ParticlePdg.clear();
+  G4ParticleMass.clear();
+  G4ParticleEnergy.clear();
+
+  G4ParticleStartPosX.clear();
+  G4ParticleStartPosY.clear();
+  G4ParticleStartPosZ.clear();
+  
+  G4ParticleMomX.clear();
+  G4ParticleMomY.clear();
+  G4ParticleMomZ.clear();
+
+  G4ParticleEndPosX.clear();
+  G4ParticleEndPosY.clear();
+  G4ParticleEndPosZ.clear();
+  G4ParticleNum.clear();
+  G4ParticleMother.clear();
+}
+
+
+void protoana::pi0TestSelection::CollectG4Particle(int pdg = 0)
+{
+    const sim::ParticleList & plist = pi_serv->ParticleList();
+    for(auto part = plist.begin(); part != plist.end(); part ++)
+    {
+      const simb::MCParticle* pPart = part->second;
+      //std::cout << "PdgCode: " << pPart->PdgCode() << std::endl;
+      if(pdg != 0)
+      {
+        if(pdg == pPart->PdgCode())
+        {
+          G4ParticlePdg.push_back(pPart->PdgCode());
+          G4ParticleEnergy.push_back(pPart->E());
+          G4ParticleMass.push_back(pPart->Mass());
+          
+          TLorentzVector StartPos = pPart->Position(0);
+          G4ParticleStartPosX.push_back(StartPos.X());
+          G4ParticleStartPosY.push_back(StartPos.Y());
+          G4ParticleStartPosZ.push_back(StartPos.Z());
+          
+          TLorentzVector EndPos = pPart->EndPosition();
+          G4ParticleEndPosX.push_back(EndPos.X());
+          G4ParticleEndPosY.push_back(EndPos.Y());
+          G4ParticleEndPosZ.push_back(EndPos.Z());
+
+          TLorentzVector momentum = pPart->Momentum();
+          G4ParticleMomX.push_back(momentum.X());
+          G4ParticleMomY.push_back(momentum.Y());
+          G4ParticleMomZ.push_back(momentum.Z());
+
+          G4ParticleNum.push_back(part->first);
+          G4ParticleMother.push_back(pPart->Mother());
+
+          std::cout << "iter: " << part->first << std::endl;
+          std::cout << "number of Daughters: " << pPart->NumberDaughters() << std::endl;
+          std::cout << "first Daughter: " << pPart->FirstDaughter() << std::endl;
+          std::cout << "last Daughter: " << pPart->LastDaughter() << std::endl;
+          auto daughter = plist.find(pPart->FirstDaughter())->second;
+          for (int i = pPart->FirstDaughter(); i < pPart->FirstDaughter() + pPart->NumberDaughters(); i++)
+          {
+            daughter = plist.find(i)->second;
+            G4ParticlePdg.push_back(daughter->PdgCode());
+            G4ParticleEnergy.push_back(daughter->E());
+            G4ParticleMass.push_back(daughter->Mass());
+            
+            TLorentzVector StartPos = daughter->Position(0);
+            G4ParticleStartPosX.push_back(StartPos.X());
+            G4ParticleStartPosY.push_back(StartPos.Y());
+            G4ParticleStartPosZ.push_back(StartPos.Z());
+
+            TLorentzVector EndPos = daughter->EndPosition();
+            G4ParticleEndPosX.push_back(EndPos.X());
+            G4ParticleEndPosY.push_back(EndPos.Y());
+            G4ParticleEndPosZ.push_back(EndPos.Z());
+            
+            TLorentzVector momentum = daughter->Momentum();
+            G4ParticleMomX.push_back(momentum.X());
+            G4ParticleMomY.push_back(momentum.Y());
+            G4ParticleMomZ.push_back(momentum.Z());
+
+            G4ParticleNum.push_back(i);
+            G4ParticleMother.push_back(daughter->Mother());
+          }
+          
+        }
+        else
+        {
+          continue;
+        }
+      }
+      else
+      {
+        G4ParticlePdg.push_back(pPart->PdgCode());
+        G4ParticleEnergy.push_back(pPart->E());
+        G4ParticleMass.push_back(pPart->Mass());
+        TLorentzVector StartPos = pPart->Position(0);
+        TLorentzVector EndPos = pPart->EndPosition();
+        G4ParticleStartPosX.push_back(StartPos.X());
+        G4ParticleStartPosY.push_back(StartPos.Y());
+        G4ParticleStartPosZ.push_back(StartPos.Z());
+
+        G4ParticleEndPosX.push_back(EndPos.X());
+        G4ParticleEndPosY.push_back(EndPos.Y());
+        G4ParticleEndPosZ.push_back(EndPos.Z());
+      }
+    }
+    std::cout << "number of G4 particles: " << plist.size() << std::endl;
+}
+
+
+void protoana::pi0TestSelection::AnalyseDaughterPFP(const recob::PFParticle &daughterPFP, const art::Event &evt, const detinfo::DetectorPropertiesData &detProp, anab::MVAReader<recob::Hit,4> &hitResults)
+{
+  // determine if they are track like or shower like using pandora
+  // then fill a vector containing this data: 11 = shower 13 = track
+  pandoraTags.push_back(PandoraIdentification(daughterPFP, evt));
+
+  // number of collection plane hits
+  auto collection_hits = pfpUtil.GetPFParticleHitsFromPlane_Ptrs( daughterPFP, evt, fPFParticleTag, 2 ); // get collection plane hit objects for the daughter
+  unsigned int num = collection_hits.size(); // number of hits
+  nHits.push_back(num);
+  std::cout << "collection plane hits: " << num << std::endl;
+
+
+  // calculate cnn score
+  std::vector<double> cnnOutput = CNNScoreCalculator(hitResults, collection_hits, num);
+  CNNScore.push_back(cnnOutput[0]);
+  // also output the average and em track score to calculate it the way done in python
+  emScore.push_back(cnnOutput[1]);
+  trackScore.push_back(cnnOutput[2]);
+
+
+  const recob::Shower* shower = 0x0; // intilise the forced shower object
+  std::cout << "Getting shower" << std::endl;
+  // try assigning the forced shower object
+  try
+  {
+    shower =	pfpUtil.GetPFParticleShower(daughterPFP, evt, fPFParticleTag, "pandora2Shower");
+
+    if(shower)
+    {
+      std::cout << "got shower" << std::endl;
+      const std::vector<art::Ptr<recob::Hit> > showerHits = showerUtil.GetRecoShowerArtHits(*shower, evt, "pandora2Shower");
+      art::FindManyP<recob::SpacePoint> spFromHits(showerHits, evt, fHitTag); // get space point objects of the hits
+
+      std::cout << "getting start and direction" << std::endl;
+      TVector3 showerStart = shower->ShowerStart();
+      TVector3 showerDir = shower->Direction();
+      std::cout << "got start and direction" << std::endl;
+
+      startPosX.push_back(showerStart.X());
+      startPosY.push_back(showerStart.Y());
+      startPosZ.push_back(showerStart.Z());
+
+      dirX.push_back(showerDir.X());
+      dirY.push_back(showerDir.Y());
+      dirZ.push_back(showerDir.Z());
+
+      // calculates quantities needed to compute the start hits <move to function?>
+      std::vector<double> hitRad; // magnitudes of cross product of hit positions and shower direction
+      std::vector<double> hitLong; // dot product of of hit positions and shower direction
+      for(unsigned int n = 0; n < collection_hits.size(); n++)
+      {
+        std::vector<art::Ptr<recob::SpacePoint>> sps = spFromHits.at(n); // get nth space point
+
+        if(!sps.empty())
+        {
+          TVector3 hitPoint(sps[0]->XYZ()[0], sps[0]->XYZ()[1], sps[0]->XYZ()[2]); // create space point position vector
+
+          std::vector<double> startHitQuantities = StartHitQuantityCalculator(showerStart, hitPoint, showerDir); // get start hit quantities
+
+          hitRad.push_back(startHitQuantities[0]);
+          hitLong.push_back(startHitQuantities[1]);
+        }
+        else
+        {
+          hitRad.push_back(-999);
+          hitLong.push_back(-999);
+        }
+      }
+
+      hitRadial.push_back(hitRad);
+      hitLongitudinal.push_back(hitLong);
+
+      // calculate and push back shower energy
+      energy.push_back(ShowerEnergyCalculator(showerHits, detProp, spFromHits));
+    }
+    else
+    {
+      std::cout << "couldn't get shower object! Moving on" << std::endl;
+      startPosX.push_back(-999);
+      startPosY.push_back(-999);
+      startPosZ.push_back(-999);
+      std::vector<double> null (1, -999);
+      hitRadial.push_back( null );
+      hitLongitudinal.push_back( null );
+      dirX.push_back(-999);
+      dirY.push_back(-999);
+      dirZ.push_back(-999);
+      energy.push_back(-999);
+    }
+  }
+  catch( const cet::exception &e )
+  {
+    std::cout << "couldn't get shower object! Moving on" << std::endl;
+    startPosX.push_back(-999);
+    startPosY.push_back(-999);
+    startPosZ.push_back(-999);
+    dirX.push_back(-999);
+    dirY.push_back(-999);
+    dirZ.push_back(-999);
+    energy.push_back(-999);
+  }
+}
+
+
+void protoana::pi0TestSelection::AnalyseBeamPFP(const recob::PFParticle &beam, const art::Event &evt)
+{
+  pdgs.push_back(beam.PdgCode()); // get ID of particles
+
+  const recob::Track* beamTrack = 0x0; // set to null
+  beamTrack = pfpUtil.GetPFParticleTrack(beam, evt, fPFParticleTag, fTrackerTag); // get the beam track if it exists
+  
+  std::cout << "Pandora ID of beam particle: " << PandoraIdentification(beam, evt) << std::endl;
+
+  // store beam track info
+  if(!beamTrack)
+  {
+    std::cout<< "no beam track found, moving on" << std::endl;
+    beamStartPosX = -999;
+    beamStartPosY = -999;
+    beamStartPosZ = -999;
+    beamEndPosX = -999;
+    beamEndPosY = -999;
+    beamEndPosZ = -999;
+  }
+  else
+  {
+    beamStartPosX = beamTrack->Trajectory().Start().X();
+    beamStartPosY = beamTrack->Trajectory().Start().Y();
+    beamStartPosZ = beamTrack->Trajectory().Start().Z();
+    beamEndPosX = beamTrack->Trajectory().End().X();
+    beamEndPosY = beamTrack->Trajectory().End().Y();
+    beamEndPosZ = beamTrack->Trajectory().End().Z();
+
+    // if the beam enters from the opposite direction
+    if(beamStartPosZ > beamEndPosZ)
+    {
+      beamStartPosX = beamTrack->Trajectory().End().X();
+      beamStartPosY = beamTrack->Trajectory().End().Y();
+      beamStartPosZ = beamTrack->Trajectory().End().Z();
+      beamEndPosX = beamTrack->Trajectory().Start().X();
+      beamEndPosY = beamTrack->Trajectory().Start().Y();
+      beamEndPosZ = beamTrack->Trajectory().Start().Z();
+    }
+  }
+}
+
+
+void protoana::pi0TestSelection::AnalyseMCTruth(const recob::PFParticle &daughter, const art::Event &evt, const detinfo::DetectorClocksData &clockData)
+{
+  std::cout << "getting shared hits" << std::endl;
+  // match the MC particle assosiated to the daughter PFParticle by comparing the hit objects
+  protoana::MCParticleSharedHits match = truthUtil.GetMCParticleByHits( clockData, daughter, evt, fPFParticleTag, fHitTag );
+  std::cout << "got shared hits" << std::endl;
+  const simb::MCParticle* mcParticle = match.particle; // get the MCParticle object from the match
+  if(mcParticle)
+  {
+    std::cout << "we have matched the MC particles!" << std::endl;
+    TLorentzVector trueDaughterStartPos = mcParticle->Position(0);
+    TLorentzVector trueDaughterEndPos = mcParticle->EndPosition();
+    TLorentzVector trueDaughterMomentum = mcParticle->Momentum();
+    trueDaughterStartPosX.push_back(trueDaughterStartPos.X());
+    trueDaughterStartPosY.push_back(trueDaughterStartPos.Y());
+    trueDaughterStartPosZ.push_back(trueDaughterStartPos.Z());
+    trueDaughterEndPosX.push_back(trueDaughterEndPos.X());
+    trueDaughterEndPosY.push_back(trueDaughterEndPos.Y());
+    trueDaughterEndPosZ.push_back(trueDaughterEndPos.Z());
+    trueDaughterMomentumX.push_back(trueDaughterMomentum.X());
+    trueDaughterMomentumY.push_back(trueDaughterMomentum.Y());
+    trueDaughterMomentumZ.push_back(trueDaughterMomentum.Z());
+    
+
+    trueDaughterEnergy.push_back(mcParticle->E());
+    trueDaughterPdg.push_back(mcParticle->PdgCode());
+    trueDaughterMass.push_back(mcParticle->Mass());
+  }
+  else
+  {
+    std::cout << "MC particle not matched" << std::endl;
+    trueDaughterStartPosX.push_back(-999);
+    trueDaughterStartPosY.push_back(-999);
+    trueDaughterStartPosZ.push_back(-999);
+    trueDaughterEndPosX.push_back(-999);
+    trueDaughterEndPosY.push_back(-999);
+    trueDaughterEndPosZ.push_back(-999);
+    trueDaughterMomentumX.push_back(-999);
+    trueDaughterMomentumY.push_back(-999);
+    trueDaughterMomentumZ.push_back(-999);
+    trueDaughterEnergy.push_back(-999);
+    trueDaughterPdg.push_back(-999);
+    trueDaughterMass.push_back(-999);
+  }
+}
+
+
+void protoana::pi0TestSelection::AnalyseMCTruthBeam(const art::Event &evt)
+{
+  const simb::MCParticle* true_beam_particle = 0x0;
+  auto mcTruths = evt.getValidHandle<std::vector<simb::MCTruth>>(fGeneratorTag);
+  true_beam_particle = truthUtil.GetGeantGoodParticle((*mcTruths)[0],evt);
+  if( !true_beam_particle ){
+    std::cout << "No true beam particle" << std::endl;
+    return;
+  }
+  else
+  {
+    std::cout << "Found true Beam particle" << std::endl;
+  }
+
+  trueBeamPdg = true_beam_particle->PdgCode();
+  trueBeamMass = true_beam_particle->Mass();
+  trueBeamEnergy = true_beam_particle->E();
+
+  TLorentzVector trueBeamStartPos = true_beam_particle->Position(0);
+  
+  trueBeamStartPosX = trueBeamStartPos.X();
+  trueBeamStartPosX = trueBeamStartPos.Y();
+  trueBeamStartPosX = trueBeamStartPos.Z();
+
+  TLorentzVector trueBeamEndPos = true_beam_particle->EndPosition();
+  
+  trueBeamEndPosX = trueBeamEndPos.X();
+  trueBeamEndPosX = trueBeamEndPos.Y();
+  trueBeamEndPosX = trueBeamEndPos.Z();
+}
+
+
+void protoana::pi0TestSelection::AnalyseFromBeam(art::Event const &evt, const detinfo::DetectorClocksData &clockData, const detinfo::DetectorPropertiesData &detProp, anab::MVAReader<recob::Hit,4> &hitResults, std::vector<recob::PFParticle> pfpVec)
+{
+  // Get only Beam particle by checking the Beam slices
+  std::vector<const recob::PFParticle*> beamParticles = pfpUtil.GetPFParticlesFromBeamSlice(evt, fPFParticleTag);
+  
+  if(beamParticles.size() == 0)
+  {
+    // nothing to do for this event
+    std::cout << "no beam particle, moving on..." << std::endl;
+    totalEvents ++;
+    return;
+  }
+  if(beamParticles.size() > 1)
+  {
+    // consider support for this edge case (if this even occurs?)
+    std::cout << "there shouldn't be more than one beam particle" << std::endl;
+  }
+  std::cout << "There are " << beamParticles.size() << " beam particles" << std::endl;
+  auto beamParticle = beamParticles[0]; // get the first beam particle (if exists)
+  beamEvents ++;
+
+  // get track-like beam info, not for pi0 only MC events
+  if(!fPi0Only)
+  {
+    AnalyseBeamPFP(*beamParticle, evt);
+  }
+  else
+  {
+    // we want to process the beam like a dughter event for pi0 only particle gun tests
+    AnalyseDaughterPFP(*beamParticle, evt, detProp, hitResults);
+    beamStartPosX = -999;
+    beamStartPosY = -999;
+    beamStartPosZ = -999;
+    beamEndPosX = -999;
+    beamEndPosY = -999;
+    beamEndPosZ = -999;
+  }
+
+  // analyse each daughter PFParticle from the beam
+  for( size_t daughterID : beamParticle->Daughters() )
+  {
+    const recob::PFParticle * daughterPFP = &(pfpVec.at( daughterID ));
+    AnalyseDaughterPFP(*daughterPFP, evt, detProp, hitResults);
+  }
+
+  // store any MC reated information here i.e. MC truth info
+  if(!evt.isRealData())
+  {
+    if(!fPi0Only)
+    {
+      AnalyseMCTruthBeam(evt);
+    }
+    else
+    {
+      AnalyseMCTruth(*beamParticle, evt, clockData);
+      trueBeamPdg = -999;
+      trueBeamMass = -999;
+      trueBeamEnergy = -999;
+      trueBeamStartPosX = -999; 
+      trueBeamStartPosX = -999;
+      trueBeamStartPosX = -999;
+      trueBeamEndPosX = -999;
+      trueBeamEndPosX = -999;
+      trueBeamEndPosX = -999;
+    }
+
+    // backtrack each daughter PFParticle from the beam
+    for( size_t daughterID : beamParticle->Daughters() )
+    {
+      const recob::PFParticle * daughterPFP = &(pfpVec.at( daughterID ));
+      AnalyseMCTruth(*daughterPFP, evt, clockData);
+    }
+    CollectG4Particle(111);
+  }
+}
+
+
+void protoana::pi0TestSelection::AnalyseAllPFP(const art::Event &evt, const detinfo::DetectorClocksData &clockData, const detinfo::DetectorPropertiesData &detProp, anab::MVAReader<recob::Hit,4> &hitResults, std::vector<recob::PFParticle> pfpVec)
+{
+  if(fPi0Only)
+  {
+    for(recob::PFParticle pfp : pfpVec)
+    {
+      std::cout << "is primary? " << pfp.IsPrimary() << std::endl; 
+      std::cout << "Number of daughters: " << pfp.NumDaughters() << std::endl;
+      AnalyseDaughterPFP(pfp, evt, detProp, hitResults);
+      if(!evt.isRealData())
+      {
+        AnalyseMCTruth(pfp, evt, clockData);
+      }
+    }
+    
+    // no beam particle so set values to -999
+    beamStartPosX = -999;
+    beamStartPosY = -999;
+    beamStartPosZ = -999;
+    beamEndPosX = -999;
+    beamEndPosY = -999;
+    beamEndPosZ = -999;
+    trueBeamPdg = -999;
+    trueBeamMass = -999;
+    trueBeamEnergy = -999;
+    trueBeamStartPosX = -999; 
+    trueBeamStartPosX = -999;
+    trueBeamStartPosX = -999;
+    trueBeamEndPosX = -999;
+    trueBeamEndPosX = -999;
+    trueBeamEndPosX = -999;
+  }
+
+  
+  if(!evt.isRealData())
+  {
+    CollectG4Particle(111);
+  }
 }
 
 
@@ -409,7 +895,6 @@ void protoana::pi0TestSelection::beginJob()
   // hit/energy quantities
   fOutTree->Branch("reco_daughter_PFP_nHits_collection", &nHits);
   fOutTree->Branch("reco_daughter_allShower_energy", &energy);
-  fOutTree->Branch("reco_daughter_PFP_true_byHits_startE", &energyMC);
 
   // quantity used to calculate the number of start hits
   fOutTree->Branch("hitRadial", &hitRadial);
@@ -426,15 +911,55 @@ void protoana::pi0TestSelection::beginJob()
   fOutTree->Branch("reco_beam_endZ", &beamEndPosZ);
 
   // true start position
-  fOutTree->Branch("reco_daughter_PFP_true_byHits_startX", &trueStartPosX);
-  fOutTree->Branch("reco_daughter_PFP_true_byHits_startY", &trueStartPosY);
-  fOutTree->Branch("reco_daughter_PFP_true_byHits_startZ", &trueStartPosZ);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_startX", &trueDaughterStartPosX);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_startY", &trueDaughterStartPosY);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_startZ", &trueDaughterStartPosZ);
 
   // true end position
-  fOutTree->Branch("reco_daughter_PFP_true_byHits_endX", &trueEndPosX);
-  fOutTree->Branch("reco_daughter_PFP_true_byHits_endY", &trueEndPosY);
-  fOutTree->Branch("reco_daughter_PFP_true_byHits_endZ", &trueEndPosZ);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_endX", &trueDaughterEndPosX);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_endY", &trueDaughterEndPosY);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_endZ", &trueDaughterEndPosZ);
 
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_startE", &trueDaughterEnergy);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_pdg", &trueDaughterPdg);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_mass", &trueDaughterMass);
+
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_pX", &trueDaughterMomentumX);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_pY", &trueDaughterMomentumY);
+  fOutTree->Branch("reco_daughter_PFP_true_byHits_pZ", &trueDaughterMomentumZ);
+
+  // true start position
+  fOutTree->Branch("reco_beam_PFP_true_byHits_startX", &trueBeamStartPosX);
+  fOutTree->Branch("reco_beam_PFP_true_byHits_startY", &trueBeamStartPosY);
+  fOutTree->Branch("reco_beam_PFP_true_byHits_startZ", &trueBeamStartPosZ);
+
+  // true end position
+  fOutTree->Branch("reco_beam_PFP_true_byHits_endX", &trueBeamEndPosX);
+  fOutTree->Branch("reco_beam_PFP_true_byHits_endY", &trueBeamEndPosY);
+  fOutTree->Branch("reco_beam_PFP_true_byHits_endZ", &trueBeamEndPosZ);
+
+  fOutTree->Branch("reco_beam_PFP_true_byHits_startE", &trueBeamEnergy);
+  fOutTree->Branch("reco_beam_PFP_true_byHits_pdg", &trueBeamPdg);
+  fOutTree->Branch("reco_beam_PFP_true_byHits_mass", &trueBeamMass);
+
+
+  fOutTree->Branch("g4_startX", &G4ParticleStartPosX);
+  fOutTree->Branch("g4_startY", &G4ParticleStartPosY);
+  fOutTree->Branch("g4_startZ", &G4ParticleStartPosZ);
+
+  fOutTree->Branch("g4_endX", &G4ParticleEndPosX);
+  fOutTree->Branch("g4_endY", &G4ParticleEndPosY);
+  fOutTree->Branch("g4_endZ", &G4ParticleEndPosZ);
+
+  fOutTree->Branch("g4_pX", &G4ParticleMomX);
+  fOutTree->Branch("g4_pY", &G4ParticleMomY);
+  fOutTree->Branch("g4_pZ", &G4ParticleMomZ);
+
+  fOutTree->Branch("g4_Pdg", &G4ParticlePdg);
+  fOutTree->Branch("g4_startE", &G4ParticleEnergy);
+  fOutTree->Branch("g4_mass", &G4ParticleMass);
+  fOutTree->Branch("g4_num", &G4ParticleNum);
+  fOutTree->Branch("g4_mother", &G4ParticleMother);
 }
 
 
@@ -444,226 +969,89 @@ void protoana::pi0TestSelection::analyze(art::Event const & evt)
   // clear any outputs that are lists
   reset();
 
+  auto run = evt.run();
+  std::cout << "run: " << run << std::endl;
+  auto subrun = evt.subRun();
+  std::cout << "subrun: " << subrun << std::endl;
+  auto event = evt.id().event();
+  std::cout << "event: " << event << std::endl;
+
+
   std::cout << "getting handle" << std::endl;
-  auto pfpVec = evt.getValidHandle<std::vector<recob::PFParticle> >( fPFParticleTag ); // object to allow us to reference the PFParticles in the event
+  art::ValidHandle<std::vector<recob::PFParticle> > pfpVec = evt.getValidHandle<std::vector<recob::PFParticle> >( fPFParticleTag ); // object to allow us to reference the PFParticles in the event
+  std::cout << "number of PFParticles: " << pfpVec->size() << std::endl;
   std::cout << "got handle" << std::endl;
   eventID = evt.id().event(); // keep for meta-data?
+
 
   std::cout << "getting clockData" << std::endl;
   auto const clockData = art::ServiceHandle<detinfo::DetectorClocksService>()->DataFor(evt); // use timing to match PFP to MC
   std::cout << "got clockData" << std::endl;
   auto const detProp =  art::ServiceHandle<detinfo::DetectorPropertiesService>()->DataFor(evt, clockData); // object containing physical proteties of the detector
 
-  // Get only Beam particle by checking the Beam slices
-  std::vector<const recob::PFParticle*> beamParticles = pfpUtil.GetPFParticlesFromBeamSlice(evt, fPFParticleTag);
-  
-  if(beamParticles.size() > 1)
-  {
-    // consider support for this edge case (if this even occurs?)
-    std::cout << "there shouldn't be more than one beam particle" << std::endl;
-  }
-  if(beamParticles.size() == 0)
-  {
-    // nothing to do for this event
-    std::cout << "no beam particle, moving on..." << std::endl;
-    totalEvents ++;
-    return;
-  }
-  auto beamParticle = beamParticles[0]; // get the first beam particle (if exists)
-  beamEvents ++;
-  pdgs.push_back(beamParticle->PdgCode()); // get ID of particles
+  anab::MVAReader<recob::Hit,4> hitResults(evt, "emtrkmichelid:emtrkmichel"); // info for CNN score calculation
 
-  const recob::Track* beamTrack = 0x0; // set to null
-  beamTrack = pfpUtil.GetPFParticleTrack(*beamParticle, evt, fPFParticleTag, fTrackerTag); // get the beam track if it exists
-
-  // store beam track info
-  if(!beamTrack)
+  // checks beam event info from the generator and data, not used for particle gun tests
+  if(!fPi0Only)
   {
-    std::cout<< "no beam track found, moving on" << std::endl;
-    beamStartPosX = -999;
-    beamStartPosY = -999;
-    beamStartPosZ = -999;
-    beamEndPosX = -999;
-    beamEndPosY = -999;
-    beamEndPosZ = -999;
+    std::vector<art::Ptr<beam::ProtoDUNEBeamEvent>> beamVec;
+    try
+    {
+      auto beamHandle = evt.getValidHandle<std::vector<beam::ProtoDUNEBeamEvent>>("generator");
+
+        if( beamHandle.isValid())
+        {
+          art::fill_ptr_vector(beamVec, beamHandle);
+        }
+    }
+    catch (const cet::exception &e)
+    {
+        std::cout << "BeamEvent generator object not found, moving on" << std::endl;
+        return;
+    }
+    const beam::ProtoDUNEBeamEvent & beamEvent = *(beamVec.at(0));
+    int nTracks = beamEvent.GetBeamTracks().size();
+    std::vector< double > momenta = beamEvent.GetRecoBeamMomenta();
+    int nMomenta = momenta.size();
+    std::cout << "Got beam event" << std::endl;
+    std::cout << "Got " << nTracks << " Tracks" << std::endl;
+    std::cout << "Got " << nMomenta << " Momenta" << std::endl;
+  }
+
+  if(fAnalyseFromBeam)
+  {
+    // Analyse PFParticles daughters of the beam
+    AnalyseFromBeam(evt, clockData, detProp, hitResults, *pfpVec);
   }
   else
   {
-    beamStartPosX = beamTrack->Trajectory().Start().X();
-    beamStartPosY = beamTrack->Trajectory().Start().Y();
-    beamStartPosZ = beamTrack->Trajectory().Start().Z();
-    beamEndPosX = beamTrack->Trajectory().End().X();
-    beamEndPosY = beamTrack->Trajectory().End().Y();
-    beamEndPosZ = beamTrack->Trajectory().End().Z();
-
-    // if the beam enters from the opposite direction
-    if(beamStartPosZ > beamEndPosZ)
+    // Analyse all PFParticles in the event
+    //AnalyseAllPFP(evt, clockData, detProp, hitResults, *pfpVec);
+    //std::vector<recob::PFParticle> Parents;
+    for(recob::PFParticle pfp : *pfpVec)
     {
-      beamStartPosX = beamTrack->Trajectory().End().X();
-      beamStartPosY = beamTrack->Trajectory().End().Y();
-      beamStartPosZ = beamTrack->Trajectory().End().Z();
-      beamEndPosX = beamTrack->Trajectory().Start().X();
-      beamEndPosY = beamTrack->Trajectory().Start().Y();
-      beamEndPosZ = beamTrack->Trajectory().Start().Z();
-    }
-  }
-
-  anab::MVAReader<recob::Hit,4> hitResults(evt, "emtrkmichelid:emtrkmichel");
-
-  // analyse each daughter PFParticle from the beam
-  for( size_t daughterID : beamParticle->Daughters() )
-  {
-    const recob::PFParticle * daughterPFP = &(pfpVec->at( daughterID ));
-
-    // determine if they are track like or shower like using pandora
-    // then fill a vector containing this data: 11 = shower 13 = track
-    pandoraTags.push_back(PandoraIdentification(*daughterPFP, evt));
-
-    // number of collection plane hits
-    auto collection_hits = pfpUtil.GetPFParticleHitsFromPlane_Ptrs( *daughterPFP, evt, fPFParticleTag, 2 ); // get collection plane hit objects for the daughter
-    unsigned int num = collection_hits.size(); // number of hits
-    nHits.push_back(num);
-    std::cout << "collection plane hits: " << num << std::endl;
-    
-    /*
-    // calculate cnn score
-    std::vector<double> cnnOutput = CNNScoreCalculator(hitResults, collection_hits, num);
-    CNNScore.push_back(cnnOutput[0]);
-    // also output the average and em track score to calculate it the way done in python
-    emScore.push_back(cnnOutput[1]);
-    trackScore.push_back(cnnOutput[2]);
-    */
-
-    cnnOutput2D cnn_collection = GetCNNOutputFromPFParticleFromPlane(*daughterPFP, evt, hitResults, pfpUtil, fPFParticleTag, 2);
-
-    double track_score_collection = (cnn_collection.nHits > 0 ?
-                          (cnn_collection.track / cnn_collection.nHits) :
-                          -999.);
-    double em_score_collection = (cnn_collection.nHits > 0 ?
-                          (cnn_collection.em / cnn_collection.nHits) :
-                          -999.);
-    trackScore.push_back(track_score_collection);
-    emScore.push_back(em_score_collection);
-
-
-    const recob::Shower* shower = 0x0; // intilise the forced shower object
-    std::cout << "Getting shower" << std::endl;
-    // try assigning the forced shower object
-    try
-    {
-      shower =	pfpUtil.GetPFParticleShower(*daughterPFP, evt, fPFParticleTag, "pandora2Shower");
-
-      if(shower)
+      //std::cout << "is primary? " << pfp.IsPrimary() << std::endl; 
+      if(pfp.IsPrimary())
       {
-        std::cout << "got shower" << std::endl;
-        const std::vector<art::Ptr<recob::Hit> > showerHits = showerUtil.GetRecoShowerArtHits(*shower, evt, "pandora2Shower");
-        art::FindManyP<recob::SpacePoint> spFromHits(showerHits, evt, fHitTag); // get space point objects of the hits
+        std::cout << "Number of daughters: " << pfp.NumDaughters() << std::endl;
+        std::cout << "Parent: " << pfp.Parent() << std::endl;
+        std::cout << "self: " << pfp.Self() << std::endl;
 
-        std::cout << "getting start and direction" << std::endl;
-        TVector3 showerStart = shower->ShowerStart();
-        TVector3 showerDir = shower->Direction();
-        std::cout << "got start and direction" << std::endl;
+        auto collection_hits = pfpUtil.GetPFParticleHitsFromPlane_Ptrs( pfp, evt, fPFParticleTag, 2 ); // get collection plane hit objects for the daughter
+        unsigned int num = collection_hits.size(); // number of hits
+        std::cout << "collection plane hits: " << num << std::endl;
 
-        startPosX.push_back(showerStart.X());
-        startPosY.push_back(showerStart.Y());
-        startPosZ.push_back(showerStart.Z());
-
-        dirX.push_back(showerDir.X());
-        dirY.push_back(showerDir.Y());
-        dirZ.push_back(showerDir.Z());
-
-        // calculates quantities needed to compute the start hits <move to function?>
-        std::vector<double> hitRad; // magnitudes of cross product of hit positions and shower direction
-        std::vector<double> hitLong; // dot product of of hit positions and shower direction
-        for(unsigned int n = 0; n < collection_hits.size(); n++)
+        const std::vector<size_t> daughters = pfp.Daughters();
+        std::cout << "list of daughters:" << std:: endl;
+        for(recob::PFParticle daughter : *pfpVec)
         {
-          std::vector<art::Ptr<recob::SpacePoint>> sps = spFromHits.at(n); // get nth space point
-
-          if(!sps.empty())
+          if(std::find(daughters.begin(), daughters.end(),daughter.Self())!=daughters.end())
           {
-            TVector3 hitPoint(sps[0]->XYZ()[0], sps[0]->XYZ()[1], sps[0]->XYZ()[2]); // create space point position vector
-
-            std::vector<double> startHitQuantities = StartHitQuantityCalculator(showerStart, hitPoint, showerDir); // get start hit quantities
-
-            hitRad.push_back(startHitQuantities[0]);
-            hitLong.push_back(startHitQuantities[1]);
-          }
-          else
-          {
-            hitRad.push_back(-999);
-            hitLong.push_back(-999);
+            auto hits = pfpUtil.GetPFParticleHitsFromPlane_Ptrs( daughter, evt, fPFParticleTag, 2 ); // get collection plane hit objects for the daughter
+            std::cout << "collection plane hits: " << hits.size() << std::endl;
           }
         }
-
-        hitRadial.push_back(hitRad);
-        hitLongitudinal.push_back(hitLong);
-
-        // calculate and push back shower energy
-        energy.push_back(ShowerEnergyCalculator(showerHits, detProp, spFromHits));
       }
-      else
-      {
-        startPosX.push_back(-999);
-        startPosY.push_back(-999);
-        startPosZ.push_back(-999);
-        dirX.push_back(-999);
-        dirY.push_back(-999);
-        dirZ.push_back(-999);
-        energy.push_back(-999);
-      }
-    }
-    catch( const cet::exception &e )
-    {
-      std::cout << "couldn't get shower object! Moving on" << std::endl;
-      startPosX.push_back(-999);
-      startPosY.push_back(-999);
-      startPosZ.push_back(-999);
-      dirX.push_back(-999);
-      dirY.push_back(-999);
-      dirZ.push_back(-999);
-      energy.push_back(-999);
-      continue;
-    }
-  }
-
-  // store any MC reated information here i.e. MC truth info
-  if(!evt.isRealData())
-  {
-    // backtrack each daughter PFParticle from the beam
-    for( size_t daughterID : beamParticle->Daughters() )
-    {
-      const recob::PFParticle * daughterPFP = &(pfpVec->at( daughterID ));
-      std::cout << "getting shared hits" << std::endl;
-      // match the MC particle assosiated to the daughter PFParticle by comparing the hit objects
-      protoana::MCParticleSharedHits match = truthUtil.GetMCParticleByHits( clockData, *daughterPFP, evt, fPFParticleTag, fHitTag );
-      std::cout << "got shared hits" << std::endl;
-      const simb::MCParticle* mcParticle = match.particle; // get the MCParticle object from the match
-      if(mcParticle)
-      {
-        std::cout << "we have matched the MC particles!" << std::endl;
-        TLorentzVector trueStartPos = mcParticle->Position(0);
-        TLorentzVector trueEndPos = mcParticle->EndPosition();
-        trueStartPosX.push_back(trueStartPos.X());
-        trueStartPosY.push_back(trueStartPos.Y());
-        trueStartPosZ.push_back(trueStartPos.Z());
-        trueEndPosX.push_back(trueEndPos.X());
-        trueEndPosY.push_back(trueEndPos.Y());
-        trueEndPosZ.push_back(trueEndPos.Z());
-
-        energyMC.push_back(mcParticle->E());
-      }
-      else
-      {
-        std::cout << "MC particle not matched" << std::endl;
-        trueStartPosX.push_back(-999);
-        trueStartPosY.push_back(-999);
-        trueStartPosZ.push_back(-999);
-        trueEndPosX.push_back(-999);
-        trueEndPosY.push_back(-999);
-        trueEndPosZ.push_back(-999);
-        energyMC.push_back(-999);
-      }
-
     }
   }
 
